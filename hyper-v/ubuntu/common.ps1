@@ -1,0 +1,73 @@
+<#
+.SYNOPSIS
+    Shared helpers dot-sourced by setup-secrets.ps1 and create-users.ps1.
+
+.NOTES
+    Do not run this file directly. It is intended to be dot-sourced:
+        . "$PSScriptRoot\common.ps1"
+#>
+
+# ---------------------------------------------------------------------------
+# ConvertFrom-VmUsersConfigJson
+#   Parses a VmUsersConfig JSON string and validates its structure.
+#   Throws a descriptive error on any problem.
+#
+#   Outputs each validated VM entry object to the pipeline. Callers must
+#   wrap the call in @() to collect the result as an array:
+#       $entries = @(ConvertFrom-VmUsersConfigJson -Json $json)
+#
+#   Centralised here so the required-field list has a single source of
+#   truth - update it once when the config schema changes.
+# ---------------------------------------------------------------------------
+
+function ConvertFrom-VmUsersConfigJson {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Json
+    )
+
+    try {
+        $parsed = $Json | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "Invalid JSON: $_"
+    }
+
+    # In PS 5.1, ConvertFrom-Json unwraps single-element JSON arrays into a
+    # bare PSCustomObject. @() normalises the result to an array in both cases.
+    $entries = @($parsed)
+
+    if ($entries.Count -eq 0) {
+        throw "Config must be a non-empty JSON array of VM user entries."
+    }
+
+    $userRequiredFields = @('username', 'shell', 'homeDir')
+
+    # Assert-ConfigFields is provided by Infrastructure.Secrets (>= 1.1.0).
+    # It handles the PS 5.1-compatible Get-Member loop and IsNullOrWhiteSpace
+    # cast so this file does not need to duplicate that logic.
+    foreach ($entry in $entries) {
+        Assert-ConfigFields `
+            -Object  $entry `
+            -Fields  @('vmName', 'users') `
+            -Context "VM entry"
+
+        # In PS 5.1 a single-element array in JSON is unwrapped to a bare
+        # object by ConvertFrom-Json. @() normalises to array.
+        $users = @($entry.users)
+
+        if ($users.Count -eq 0) {
+            throw "VM entry '$($entry.vmName)' must have at least one user."
+        }
+
+        foreach ($user in $users) {
+            Assert-ConfigFields `
+                -Object  $user `
+                -Fields  $userRequiredFields `
+                -Context "User in VM '$($entry.vmName)'"
+        }
+
+        Write-Output $entry
+    }
+}
