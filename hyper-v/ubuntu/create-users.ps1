@@ -12,7 +12,8 @@
     Prerequisites:
     - setup-secrets.ps1 has been run at least once on this machine.
     - VMs are provisioned (Infrastructure-Vm-Provisioner) and reachable.
-    - OpenSSH client is installed (ssh.exe on PATH).
+    - Posh-SSH is installed, or an internet connection is available so this
+      script can install it from PSGallery automatically.
 
 .EXAMPLE
     .\create-users.ps1
@@ -30,6 +31,20 @@ $ErrorActionPreference = 'Stop'
 # fix.
 Import-Module Infrastructure.Secrets                    -ErrorAction Stop
 Import-Module Microsoft.PowerShell.SecretManagement    -ErrorAction Stop
+
+# Posh-SSH provides New-SSHSession / Invoke-SSHCommand for password-based
+# SSH from Windows PowerShell. The provisioner does not set up key-based
+# auth, so we authenticate with the admin username/password from the vault.
+# Unlike Infrastructure.Secrets (one-time setup), Posh-SSH is a runtime
+# dependency - auto-install keeps the operational workflow self-contained.
+$poshSsh = Get-Module -ListAvailable -Name Posh-SSH |
+    Sort-Object Version -Descending | Select-Object -First 1
+
+if (-not $poshSsh) {
+    Write-Host "Installing Posh-SSH from PSGallery ..." -ForegroundColor Cyan
+    Install-Module Posh-SSH -Scope CurrentUser -Force
+}
+Import-Module Posh-SSH -Force -ErrorAction Stop
 
 . "$PSScriptRoot\common.ps1"
 
@@ -136,6 +151,164 @@ Write-Host "$($reachable.Count) of $($targets.Count) matched VM(s) reachable." `
     -ForegroundColor Cyan
 
 # ---------------------------------------------------------------------------
-# TODO: Step 4 - user reconciliation via SSH (create / update each user)
-# TODO: Step 5 - sudoers reconciliation (/etc/sudoers.d/{username})
+# 5. User reconciliation via SSH
+#    For each reachable VM, open one SSH session and process all users in it.
+#    The session is always closed in the finally block, even if a user
+#    operation throws.
+#
+#    Security note: -AcceptKey auto-trusts the host key on first connection
+#    without verifying a fingerprint. This is acceptable on an internal
+#    Hyper-V network with statically provisioned IPs. Do NOT use -AcceptKey
+#    against untrusted or shared networks.
+#
+#    Sudo assumption: cloud-init adds the provisioned admin user to the
+#    sudo group with NOPASSWD via /etc/sudoers.d/90-cloud-init-users (Ubuntu
+#    default). If your image disables passwordless sudo, add -sudo-password
+#    handling before the useradd/usermod calls.
+# ---------------------------------------------------------------------------
+
+foreach ($t in $reachable) {
+    $name  = $t.Entry.vmName
+    $users = @($t.Entry.users)
+    $prov  = $t.Provisioner
+
+    Write-Host ""
+    Write-Host "[$name] Connecting to $($prov.ipAddress) as '$($prov.username)' ..." `
+        -ForegroundColor Cyan
+
+    $credential = [PSCredential]::new(
+        $prov.username,
+        ($prov.password | ConvertTo-SecureString -AsPlainText -Force)
+    )
+
+    $session = New-SSHSession `
+        -ComputerName $prov.ipAddress `
+        -Credential   $credential `
+        -AcceptKey `
+        -ErrorAction  Stop
+
+    try {
+        foreach ($user in $users) {
+            $username = $user.username
+            $shell    = $user.shell
+            $homeDir  = $user.homeDir
+            # @() normalises PS 5.1 single-element JSON unwrapping to array.
+            $groups   = @($user.groups)
+
+            # -----------------------------------------------------------
+            # 5a. Check if the user already exists
+            #     'id' exits 0 if the user exists, non-zero otherwise.
+            # -----------------------------------------------------------
+
+            $idResult = Invoke-SSHCommand `
+                -SessionId $session.SessionId `
+                -Command   "id '$username'" `
+                -ErrorAction Stop
+
+            if ($idResult.ExitStatus -ne 0) {
+                # -------------------------------------------------------
+                # User does not exist - create with useradd.
+                #   -m : create home directory if it does not exist
+                #   -d : home directory path
+                #   -s : login shell
+                #   -G : supplementary groups (omitted when list is empty
+                #        to avoid an error on an empty group argument)
+                # -------------------------------------------------------
+
+                $cmd = "sudo useradd -m -d '$homeDir' -s '$shell'"
+                if ($groups.Count -gt 0) {
+                    $cmd += " -G '$($groups -join ',')'"
+                }
+                $cmd += " '$username'"
+
+                $r = Invoke-SSHCommand `
+                    -SessionId $session.SessionId `
+                    -Command   $cmd `
+                    -ErrorAction Stop
+
+                if ($r.ExitStatus -ne 0) {
+                    throw "[$name] useradd failed for '$username': $($r.Error)"
+                }
+
+                Write-Host "[$name] user '$username': created" `
+                    -ForegroundColor Green
+            }
+            else {
+                # -------------------------------------------------------
+                # User exists - reconcile shell and supplementary groups.
+                # homeDir is not reconciled: moving a home directory risks
+                # data loss and is intentionally left as a manual step.
+                # -------------------------------------------------------
+
+                # getent passwd is preferred over parsing /etc/passwd
+                # because it also handles LDAP/NIS accounts.
+                $shellResult = Invoke-SSHCommand `
+                    -SessionId $session.SessionId `
+                    -Command   "getent passwd '$username' | cut -d: -f7" `
+                    -ErrorAction Stop
+
+                $currentShell = ($shellResult.Output -join '').Trim()
+
+                # id -Gn returns all groups including the primary group
+                # (which has the same name as the username on Ubuntu).
+                # Strip the primary group to isolate supplementary groups,
+                # then sort for a stable string comparison.
+                $gnResult = Invoke-SSHCommand `
+                    -SessionId $session.SessionId `
+                    -Command   "id -Gn '$username'" `
+                    -ErrorAction Stop
+
+                $currentGroups = @(
+                    ($gnResult.Output -join '').Trim() -split '\s+' |
+                    Where-Object { $_ -ne $username } |
+                    Sort-Object
+                )
+                $desiredGroups = @($groups | Sort-Object)
+
+                $shellDrifted  = $currentShell -ne $shell
+                # Join sorted arrays as comma strings for a simple equality
+                # check that handles empty arrays correctly in PS 5.1.
+                $groupsDrifted = ($currentGroups -join ',') -ne ($desiredGroups -join ',')
+
+                if ($shellDrifted -or $groupsDrifted) {
+                    # usermod -G replaces the full supplementary group list.
+                    # An empty string removes all supplementary groups.
+                    $groupArg  = $groups -join ','
+                    $updateCmd = "sudo usermod -s '$shell' -G '$groupArg' '$username'"
+
+                    $r = Invoke-SSHCommand `
+                        -SessionId $session.SessionId `
+                        -Command   $updateCmd `
+                        -ErrorAction Stop
+
+                    if ($r.ExitStatus -ne 0) {
+                        throw "[$name] usermod failed for '$username': $($r.Error)"
+                    }
+
+                    $changes = @()
+                    if ($shellDrifted) {
+                        $changes += "shell: '$currentShell' -> '$shell'"
+                    }
+                    if ($groupsDrifted) {
+                        $changes += "groups: [$($currentGroups -join ', ')] -> [$($desiredGroups -join ', ')]"
+                    }
+
+                    Write-Host "[$name] user '$username': updated ($($changes -join '; '))" `
+                        -ForegroundColor Yellow
+                }
+                else {
+                    Write-Host "[$name] user '$username': ok" -ForegroundColor Green
+                }
+            }
+        }
+    }
+    finally {
+        # Always close the session to release the TCP connection, even if
+        # an operation above threw.
+        Remove-SSHSession -SessionId $session.SessionId | Out-Null
+    }
+}
+
+# ---------------------------------------------------------------------------
+# TODO: Section 6 - sudoers reconciliation (/etc/sudoers.d/{username})
 # ---------------------------------------------------------------------------
