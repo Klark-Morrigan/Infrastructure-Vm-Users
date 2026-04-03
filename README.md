@@ -51,11 +51,14 @@ Joins them by `vmName`, then for each reachable VM reconciles:
 - **Windows 11** with PowerShell 5.1 or later.
 - **[Infrastructure-Vm-Provisioner]** has already run - the `VmProvisioner`
   vault and its VMs must exist.
-- The **admin user on each VM has passwordless sudo** - this is the default
-  when Ubuntu cloud images are provisioned with cloud-init (the provisioner
-  sets this up automatically via `/etc/sudoers.d/90-cloud-init-users`).
+- The **admin user on each VM can run sudo without a password prompt** - SSH
+  authentication uses the password from the `VmProvisioner` vault, but once
+  connected, sudo must not require a second password entry. This is the
+  default for Ubuntu cloud images provisioned with cloud-init (set up
+  automatically via `/etc/sudoers.d/90-cloud-init-users`).
 - An internet connection on first run (PSGallery is used to install
-  `Infrastructure.Secrets` and `Posh-SSH` automatically).
+  `Infrastructure.Common`, `Infrastructure.Secrets`, and `Posh-SSH`
+  automatically).
 
 ---
 
