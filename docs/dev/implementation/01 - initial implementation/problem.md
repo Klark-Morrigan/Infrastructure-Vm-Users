@@ -23,7 +23,17 @@ repos must not require admin credentials at runtime.
 1. Read VM connection details (IP, admin credentials) from the existing
    `VmProvisioner` vault.
 2. Read the desired user list per VM from this repo's own `VmUsers` vault.
-3. For each VM, reconcile users against the desired state:
+3. For each VM, reconcile groups against the desired state:
+   - Groups that do not exist are created, optionally with a pinned GID.
+     GID pinning is needed when multiple machines share storage (NFS, Docker
+     bind mounts) - ownership is stored on disk as a number, not a name, so
+     all machines must agree on the number. For local-only storage the OS can
+     assign the GID freely.
+   - A GID mismatch on an existing group is an error, not a silent fix.
+     Changing a GID with groupmod does not update the numeric ownership
+     already stored on files - those files become owned by a phantom ID until
+     manually corrected with find + chown.
+4. For each VM, reconcile users against the desired state:
    - Users that do not exist are created with the specified shell, home
      directory, and groups.
    - Sudoers rules are compared: missing rules are added, extra rules
