@@ -151,10 +151,10 @@ Write-Host "$($reachable.Count) of $($targets.Count) matched VM(s) reachable." `
     -ForegroundColor Cyan
 
 # ---------------------------------------------------------------------------
-# 5. User reconciliation via SSH
-#    For each reachable VM, open one SSH session and process all users in it.
-#    The session is always closed in the finally block, even if a user
-#    operation throws.
+# 5. Reconciliation via SSH
+#    For each reachable VM, open one SSH session and reconcile groups, users,
+#    and sudoers rules within it. The session is always closed in the finally
+#    block, even if an operation throws.
 #
 #    Security note: -AcceptKey auto-trusts the host key on first connection
 #    without verifying a fingerprint. This is acceptable on an internal
@@ -188,6 +188,144 @@ foreach ($t in $reachable) {
         -ErrorAction  Stop
 
     try {
+        # -------------------------------------------------------------------
+        # 5a. Group reconciliation
+        #     Must run before the user loop: useradd/usermod fail if a
+        #     referenced group does not yet exist.
+        #
+        #     Explicitly declared groups (from the 'groups' config array) are
+        #     processed first and support optional GID pinning and description.
+        #     GID conflict (group exists with a different GID) is an error -
+        #     silent renumbering would break ownership of files on disk.
+        #
+        #     Groups referenced in users[].groups but not declared explicitly
+        #     are created implicitly with no GID pinning as a fallback for
+        #     simple configs.
+        # -------------------------------------------------------------------
+
+        # Get-Member is used to check for the optional 'groups' property
+        # without triggering StrictMode on a missing key.
+        $entryMembers   = (Get-Member -InputObject $t.Entry -MemberType NoteProperty).Name
+        $declaredGroups = if ($entryMembers -contains 'groups') {
+            @($t.Entry.groups)
+        } else {
+            @()
+        }
+
+        # Track declared names so the implicit fallback skips them.
+        $declaredGroupNames = [System.Collections.Generic.HashSet[string]]::new(
+            [System.StringComparer]::OrdinalIgnoreCase)
+
+        foreach ($group in $declaredGroups) {
+            $groupName   = $group.groupName
+            # gid and description are optional - missing properties return
+            # $null under StrictMode when accessed on a PSCustomObject that
+            # lacks them; use Get-Member to guard.
+            $groupMembers = (Get-Member -InputObject $group -MemberType NoteProperty).Name
+            $gid          = if ($groupMembers -contains 'gid')         { $group.gid }         else { $null }
+            $description  = if ($groupMembers -contains 'description') { $group.description } else { $null }
+
+            $null = $declaredGroupNames.Add($groupName)
+
+            $getentResult = Invoke-SSHCommand `
+                -SessionId $session.SessionId `
+                -Command   "getent group '$groupName'" `
+                -ErrorAction Stop
+
+            if ($getentResult.ExitStatus -ne 0) {
+                # Group absent - create it, optionally with a pinned GID.
+                $createCmd = 'sudo groupadd'
+                if ($null -ne $gid -and "$gid" -ne '') {
+                    $createCmd += " -g $gid"
+                }
+                $createCmd += " '$groupName'"
+
+                $r = Invoke-SSHCommand `
+                    -SessionId $session.SessionId `
+                    -Command   $createCmd `
+                    -ErrorAction Stop
+
+                if ($r.ExitStatus -ne 0) {
+                    throw "[$name] groupadd failed for '$groupName': $($r.Error)"
+                }
+
+                # Write description to /etc/gshadow (informational only;
+                # not read back for reconciliation - always overwritten).
+                if ($null -ne $description -and "$description" -ne '') {
+                    $r = Invoke-SSHCommand `
+                        -SessionId $session.SessionId `
+                        -Command   "sudo gpasswd --comment '$description' '$groupName'" `
+                        -ErrorAction Stop
+
+                    if ($r.ExitStatus -ne 0) {
+                        throw "[$name] gpasswd --comment failed for '$groupName': $($r.Error)"
+                    }
+                }
+
+                Write-Host "[$name] group '$groupName': created" -ForegroundColor Green
+            }
+            else {
+                # Group exists - check GID if one was declared.
+                if ($null -ne $gid -and "$gid" -ne '') {
+                    # getent group output format: name:password:gid:members
+                    $currentGid = (($getentResult.Output -join '').Trim() -split ':')[2]
+
+                    if ($currentGid -ne "$gid") {
+                        throw (
+                            "[$name] group '$groupName' exists with GID $currentGid " +
+                            "but config requires GID $gid. Correct manually: " +
+                            "sudo groupmod -g $gid '$groupName' " +
+                            "(verify no files are owned by GID $currentGid first: " +
+                            "find / -gid $currentGid 2>/dev/null)"
+                        )
+                    }
+                }
+
+                Write-Host "[$name] group '$groupName': ok" -ForegroundColor Green
+            }
+        }
+
+        # Implicit fallback: groups referenced in users[].groups but not
+        # declared in the groups array are created with no GID pinning.
+        $allReferencedGroups = @(
+            $users |
+            ForEach-Object { @($_.groups) } |
+            Where-Object   { $_ -ne '' } |
+            Sort-Object -Unique
+        )
+
+        foreach ($groupName in $allReferencedGroups) {
+            if ($declaredGroupNames.Contains($groupName)) {
+                continue  # Already handled in the explicit pass above.
+            }
+
+            $getentResult = Invoke-SSHCommand `
+                -SessionId $session.SessionId `
+                -Command   "getent group '$groupName'" `
+                -ErrorAction Stop
+
+            if ($getentResult.ExitStatus -ne 0) {
+                $r = Invoke-SSHCommand `
+                    -SessionId $session.SessionId `
+                    -Command   "sudo groupadd '$groupName'" `
+                    -ErrorAction Stop
+
+                if ($r.ExitStatus -ne 0) {
+                    throw "[$name] groupadd failed for '$groupName': $($r.Error)"
+                }
+
+                Write-Host "[$name] group '$groupName': created (implicit)" `
+                    -ForegroundColor Green
+            }
+            else {
+                Write-Host "[$name] group '$groupName': ok" -ForegroundColor Green
+            }
+        }
+
+        # -------------------------------------------------------------------
+        # 5b. User reconciliation
+        # -------------------------------------------------------------------
+
         foreach ($user in $users) {
             $username = $user.username
             $shell    = $user.shell
@@ -195,10 +333,8 @@ foreach ($t in $reachable) {
             # @() normalises PS 5.1 single-element JSON unwrapping to array.
             $groups   = @($user.groups)
 
-            # -----------------------------------------------------------
-            # 5a. Check if the user already exists
-            #     'id' exits 0 if the user exists, non-zero otherwise.
-            # -----------------------------------------------------------
+            # Check if the user already exists.
+            # 'id' exits 0 if the user exists, non-zero otherwise.
 
             $idResult = Invoke-SSHCommand `
                 -SessionId $session.SessionId `
@@ -302,12 +438,14 @@ foreach ($t in $reachable) {
             }
 
             # -----------------------------------------------------------
-            # 5b. Sudoers reconciliation
-            #     Each user gets its own /etc/sudoers.d/{username} file so
-            #     edits are isolated per user. We write to a temp file,
-            #     chmod, and validate with visudo before moving it into
-            #     place. The live file is never touched if the new content
-            #     fails validation, so a broken rule cannot lock out sudo.
+            # 5c. Sudoers reconciliation
+            #     Runs for all users regardless of whether they were just
+            #     created or already existed. Each user gets its own
+            #     /etc/sudoers.d/{username} file so edits are isolated per
+            #     user. We write to a temp file, chmod, and validate with
+            #     visudo before moving it into place. The live file is never
+            #     touched if validation fails, so a bad rule cannot lock
+            #     out sudo.
             # -----------------------------------------------------------
 
             # @() normalises PS 5.1 single-element JSON unwrapping to array.
