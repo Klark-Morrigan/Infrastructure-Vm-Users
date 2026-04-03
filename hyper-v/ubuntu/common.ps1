@@ -5,6 +5,7 @@
 .NOTES
     Do not run this file directly. It is intended to be dot-sourced:
         . "$PSScriptRoot\common.ps1"
+    Infrastructure.Common must be imported before dot-sourcing this file.
 #>
 
 # ---------------------------------------------------------------------------
@@ -44,17 +45,17 @@ function ConvertFrom-VmUsersConfigJson {
 
     $userRequiredFields = @('username', 'shell', 'homeDir')
 
-    # Assert-ConfigFields is provided by Infrastructure.Secrets (>= 1.1.0).
+    # Assert-RequiredProperties is provided by Infrastructure.Common.
     # It handles the PS 5.1-compatible Get-Member loop and IsNullOrWhiteSpace
     # cast so this file does not need to duplicate that logic.
     foreach ($entry in $entries) {
-        Assert-ConfigFields `
-            -Object  $entry `
-            -Fields  @('vmName', 'users') `
-            -Context "VM entry"
+        Assert-RequiredProperties `
+            -Object     $entry `
+            -Properties @('vmName', 'users') `
+            -Context    "VM entry"
 
         # Validate the optional groups array when present.
-        # 'groups' is not in the required fields list above because omitting
+        # 'groups' is not in the required properties list above because omitting
         # it is valid - it means no groups need to be explicitly declared for
         # this VM. Get-Member is used to check presence without triggering
         # StrictMode on a missing property.
@@ -64,10 +65,10 @@ function ConvertFrom-VmUsersConfigJson {
             # object by ConvertFrom-Json. @() normalises to array.
             $groups = @($entry.groups)
             foreach ($group in $groups) {
-                Assert-ConfigFields `
-                    -Object  $group `
-                    -Fields  @('groupName') `
-                    -Context "Group in VM '$($entry.vmName)'"
+                Assert-RequiredProperties `
+                    -Object     $group `
+                    -Properties @('groupName') `
+                    -Context    "Group in VM '$($entry.vmName)'"
             }
         }
 
@@ -80,10 +81,10 @@ function ConvertFrom-VmUsersConfigJson {
         }
 
         foreach ($user in $users) {
-            Assert-ConfigFields `
-                -Object  $user `
-                -Fields  $userRequiredFields `
-                -Context "User in VM '$($entry.vmName)'"
+            Assert-RequiredProperties `
+                -Object     $user `
+                -Properties $userRequiredFields `
+                -Context    "User in VM '$($entry.vmName)'"
         }
 
         Write-Output $entry

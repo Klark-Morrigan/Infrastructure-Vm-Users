@@ -47,20 +47,24 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Install or update Infrastructure.Secrets from PSGallery.
-# The minimum version is pinned here - bump it when a newer feature is required.
-$requiredVersion = [Version]'1.1.0'
-$installedModule = Get-Module -ListAvailable -Name Infrastructure.Secrets |
+# Bootstrap Infrastructure.Common, which provides Invoke-ModuleInstall used
+# for all subsequent module installs. This inline block is the only install
+# logic that cannot be abstracted - you cannot call a function from a module
+# that hasn't been installed yet.
+$_common = Get-Module -ListAvailable -Name Infrastructure.Common |
     Sort-Object Version -Descending | Select-Object -First 1
-
-if (-not $installedModule -or $installedModule.Version -lt $requiredVersion) {
-    Write-Host "Installing Infrastructure.Secrets >= $requiredVersion from PSGallery ..." `
-        -ForegroundColor Cyan
-    Install-Module Infrastructure.Secrets -Scope CurrentUser -Force
+if (-not $_common -or $_common.Version -lt [Version]'1.0.0') {
+    Install-Module Infrastructure.Common -Scope CurrentUser -Force
 }
-Import-Module Infrastructure.Secrets -Force -ErrorAction Stop
+Import-Module Infrastructure.Common -Force -ErrorAction Stop
 
+# common.ps1 is dot-sourced after Infrastructure.Common is loaded.
+# It only calls Assert-RequiredProperties inside function bodies, not at
+# load time, so this ordering is safe.
 . "$PSScriptRoot\common.ps1"
+
+# The minimum version is pinned here - bump it when a newer feature is required.
+Invoke-ModuleInstall -ModuleName 'Infrastructure.Secrets' -MinimumVersion '2.0.0'
 
 Initialize-InfrastructureVault `
     -VaultName  'VmUsers' `

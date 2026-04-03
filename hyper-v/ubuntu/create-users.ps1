@@ -25,10 +25,23 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Bootstrap Infrastructure.Common first - it provides Invoke-ModuleInstall
+# used for all subsequent module installs. Infrastructure.Secrets and
+# Posh-SSH are prerequisites (setup-secrets.ps1 installs the former; the
+# latter is auto-installed below), so we do not silently install them here.
+$_common = Get-Module -ListAvailable -Name Infrastructure.Common |
+    Sort-Object Version -Descending | Select-Object -First 1
+if (-not $_common -or $_common.Version -lt [Version]'1.0.0') {
+    Install-Module Infrastructure.Common -Scope CurrentUser -Force
+}
+Import-Module Infrastructure.Common -Force -ErrorAction Stop
+
+# common.ps1 is dot-sourced after Infrastructure.Common is loaded so
+# Assert-RequiredProperties is available inside its function bodies.
+. "$PSScriptRoot\common.ps1"
+
 # Infrastructure.Secrets must already be installed by setup-secrets.ps1.
-# We import here rather than install - missing module means setup has not
-# been run yet, which is a prerequisite, not a condition we should silently
-# fix.
+# RequiredModules in its manifest pulls in Infrastructure.Common automatically.
 Import-Module Infrastructure.Secrets                    -ErrorAction Stop
 Import-Module Microsoft.PowerShell.SecretManagement    -ErrorAction Stop
 
@@ -36,17 +49,9 @@ Import-Module Microsoft.PowerShell.SecretManagement    -ErrorAction Stop
 # SSH from Windows PowerShell. The provisioner does not set up key-based
 # auth, so we authenticate with the admin username/password from the vault.
 # Unlike Infrastructure.Secrets (one-time setup), Posh-SSH is a runtime
-# dependency - auto-install keeps the operational workflow self-contained.
-$poshSsh = Get-Module -ListAvailable -Name Posh-SSH |
-    Sort-Object Version -Descending | Select-Object -First 1
-
-if (-not $poshSsh) {
-    Write-Host "Installing Posh-SSH from PSGallery ..." -ForegroundColor Cyan
-    Install-Module Posh-SSH -Scope CurrentUser -Force
-}
-Import-Module Posh-SSH -Force -ErrorAction Stop
-
-. "$PSScriptRoot\common.ps1"
+# dependency - Invoke-ModuleInstall keeps the operational workflow
+# self-contained.
+Invoke-ModuleInstall -ModuleName 'Posh-SSH' -MinimumVersion '3.0.0'
 
 # ---------------------------------------------------------------------------
 # 1. Read VmProvisionerConfig from the VmProvisioner vault
