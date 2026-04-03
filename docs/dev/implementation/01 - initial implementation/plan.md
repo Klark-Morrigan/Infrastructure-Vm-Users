@@ -4,9 +4,10 @@
 - [Step 1 - Repo skeleton](#step-1---repo-skeleton)
 - [Step 2 - setup-secrets.ps1](#step-2---setup-secretsps1)
 - [Step 3 - create-users.ps1: vault read + validation](#step-3---create-usersps1-vault-read--validation)
-- [Step 4 - create-users.ps1: user reconciliation via SSH](#step-4---create-usersps1-user-reconciliation-via-ssh)
-- [Step 5 - create-users.ps1: sudoers reconciliation](#step-5---create-usersps1-sudoers-reconciliation)
-- [Step 6 - README.md](#step-6---readmemd)
+- [Step 4 - create-users.ps1: group reconciliation via SSH](#step-4---create-usersps1-group-reconciliation-via-ssh)
+- [Step 5 - create-users.ps1: user reconciliation via SSH](#step-5---create-usersps1-user-reconciliation-via-ssh)
+- [Step 6 - create-users.ps1: sudoers reconciliation](#step-6---create-usersps1-sudoers-reconciliation)
+- [Step 7 - README.md](#step-7---readmemd)
 
 ---
 
@@ -45,19 +46,34 @@ graph TD
 calls `Initialize-InfrastructureVault` with:
 - Vault: `VmUsers`
 - Secret: `VmUsersConfig`
-- Validation: checks required fields per VM entry
+- Validation: checks required fields per VM entry and group entry
 
-**Config schema** - desired users per VM, matched to provisioner VMs by
-`vmName`:
+**Config schema** - desired groups and users per VM, matched to provisioner
+VMs by `vmName`:
+
 ```jsonc
 [
   {
     "vmName": "ubuntu-01-ci",
+    // Optional. Declares groups that must exist before users are reconciled.
+    // Allows pinning GIDs (required for NFS / Docker volume mounts that
+    // match ownership by number) and declaring groups with no members here
+    // (e.g. a shared directory group managed by Infrastructure-GitHubRunners).
+    "groups": [
+      {
+        "groupName":   "u-actions-runner",
+        // Optional. Informational; written to /etc/gshadow via gpasswd.
+        "description": "Primary group for the actions runner service account."
+      }
+    ],
     "users": [
       {
         "username":     "u-actions-runner",
         "shell":        "/usr/sbin/nologin",
         "homeDir":      "/home/u-actions-runner",
+        // No supplementary groups. useradd creates the u-actions-runner
+        // primary group automatically; u-runner-deploy joins it as a
+        // supplementary member - u-actions-runner itself does not need to.
         "groups":       [],
         "sudoersRules": []
       },
@@ -65,7 +81,9 @@ calls `Initialize-InfrastructureVault` with:
         "username":     "u-runner-deploy",
         "shell":        "/bin/bash",
         "homeDir":      "/home/u-runner-deploy",
-        "groups":       [],
+        // Joins u-actions-runner as a supplementary group to write into
+        // /home/u-actions-runner/runners/ (set g+rwx by GitHubRunners repo).
+        "groups":       ["u-actions-runner"],
         "sudoersRules": [
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /home/u-actions-runner/runners/*/config.sh",
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /home/u-actions-runner/runners/*/svc.sh",
@@ -97,7 +115,8 @@ sequenceDiagram
 **What:** Opening section of `create-users.ps1` that:
 1. Reads `VmProvisionerConfig` from the `VmProvisioner` vault - VM names,
    IPs, and admin credentials.
-2. Reads `VmUsersConfig` from the `VmUsers` vault - desired users per VM.
+2. Reads `VmUsersConfig` from the `VmUsers` vault - desired groups and users
+   per VM.
 3. Joins the two by `vmName` - warns and skips any VM in `VmUsersConfig`
    that has no matching entry in `VmProvisionerConfig`.
 4. Checks each matched VM with a ping - warns if unreachable, skips.
@@ -117,7 +136,7 @@ sequenceDiagram
     P->>VP: Get-Secret VmProvisionerConfig
     VP-->>P: VM list + admin creds
     P->>VU: Get-Secret VmUsersConfig
-    VU-->>P: desired users per VM
+    VU-->>P: desired groups + users per VM
     P->>P: join by vmName
     P->>N: Test-Connection per VM
     N-->>P: reachable / unreachable
@@ -125,7 +144,55 @@ sequenceDiagram
 
 ---
 
-## Step 4 - create-users.ps1: user reconciliation via SSH
+## Step 4 - create-users.ps1: group reconciliation via SSH
+
+**What:** For each matched, reachable VM, before processing users, reconcile
+the declared `groups` array:
+
+1. `getent group {groupName}` - check existence and current GID.
+2. **Absent** - `groupadd [-g {gid}] {groupName}`.
+3. **Present, GID matches** (or no GID declared) - `ok`, skip.
+4. **Present, GID mismatch** - throw an actionable error. Silent correction
+   would renumber files on disk owned by the old GID.
+5. If `description` is set, write it via `gpasswd --comment` (informational,
+   never read back for reconciliation).
+
+Groups referenced in `users[].groups` but not declared in `groups` are
+created implicitly with `groupadd` (no GID pinning). This fallback keeps
+simple configs concise.
+
+**Why:** Group reconciliation must precede user reconciliation because
+`useradd -G` and `usermod -G` fail if a referenced group does not yet exist.
+Explicit declaration allows GID pinning, which is required for NFS and Docker
+bind mounts. A GID conflict is an error not a silent fix to protect ownership
+of files already on disk.
+
+```mermaid
+sequenceDiagram
+    participant P as create-users.ps1
+    participant VM as Ubuntu VM
+
+    loop each declared group
+        P->>VM: getent group {groupName}
+        alt absent
+            VM-->>P: not found
+            P->>VM: groupadd [-g {gid}]
+            VM-->>P: created
+            opt description set
+                P->>VM: gpasswd --comment {desc} {groupName}
+            end
+        else present - GID matches or not declared
+            P->>P: ok - skip
+        else present - GID mismatch
+            P->>P: throw actionable error
+        end
+    end
+    note over P,VM: implicit fallback for undeclared groups runs after
+```
+
+---
+
+## Step 5 - create-users.ps1: user reconciliation via SSH
 
 **What:** For each matched, reachable VM, for each desired user:
 1. Check if the user exists (`id {username}`).
@@ -162,15 +229,15 @@ sequenceDiagram
 
 ---
 
-## Step 5 - create-users.ps1: sudoers reconciliation
+## Step 6 - create-users.ps1: sudoers reconciliation
 
 **What:** For each user, after user creation/update:
 1. Read current rules from `/etc/sudoers.d/{username}` (empty if file
    absent).
 2. Compare with desired rules.
 3. If different: rewrite the file with desired rules, `chmod 0440`,
-   validate with `visudo -c -f` - abort and restore previous content
-   if invalid.
+   validate with `visudo -c -f` - abort if invalid, leaving the live file
+   untouched.
 4. If identical: skip.
 5. Emit a per-user result: `sudoers updated`, `sudoers removed` (if desired
    is empty and file existed), or `sudoers ok`.
@@ -205,15 +272,14 @@ sequenceDiagram
 
 ---
 
-## Step 6 - README.md
+## Step 7 - README.md
 
 **What:** Root `README.md` covering:
 - What this repo does and what it does not do.
-- Prerequisites (Windows 11, OpenSSH, VMs provisioned,
-  `VmProvisioner` vault already set up).
+- Prerequisites (Windows 11, VMs provisioned, `VmProvisioner` vault set up).
 - Quick start (setup-secrets -> create-users).
-- JSON config reference with a runner users example.
-- Idempotency and reconciliation behaviour.
+- JSON config reference with a runner users example including groups.
+- Idempotency and reconciliation behaviour (including GID conflict note).
 - Repo structure.
 
 **Why:** Required after each step per global instructions; primary
