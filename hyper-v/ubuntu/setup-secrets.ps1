@@ -52,9 +52,8 @@ $ErrorActionPreference = 'Stop'
 $requiredVersion = [Version]'1.1.0'
 $installedModule = Get-Module -ListAvailable -Name Infrastructure.Secrets |
     Sort-Object Version -Descending | Select-Object -First 1
-$installed = if ($installedModule) { $installedModule.Version } else { $null }
 
-if (-not $installed -or $installed -lt $requiredVersion) {
+if (-not $installedModule -or $installedModule.Version -lt $requiredVersion) {
     Write-Host "Installing Infrastructure.Secrets >= $requiredVersion from PSGallery ..." `
         -ForegroundColor Cyan
     Install-Module Infrastructure.Secrets -Scope CurrentUser -Force
