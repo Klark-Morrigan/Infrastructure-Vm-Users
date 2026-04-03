@@ -299,6 +299,134 @@ foreach ($t in $reachable) {
                 else {
                     Write-Host "[$name] user '$username': ok" -ForegroundColor Green
                 }
+
+            # -----------------------------------------------------------
+            # 5b. Sudoers reconciliation
+            #     Each user gets its own /etc/sudoers.d/{username} file so
+            #     edits are isolated per user. We write to a temp file,
+            #     chmod, and validate with visudo before moving it into
+            #     place. The live file is never touched if the new content
+            #     fails validation, so a broken rule cannot lock out sudo.
+            # -----------------------------------------------------------
+
+            # @() normalises PS 5.1 single-element JSON unwrapping to array.
+            $desiredRules = @($user.sudoersRules)
+            $sudoersPath  = "/etc/sudoers.d/$username"
+            $tmpPath      = "/tmp/.sudoers_tmp_$username"
+
+            # Read current rules; treat an absent file as empty.
+            $existsResult = Invoke-SSHCommand `
+                -SessionId $session.SessionId `
+                -Command   "sudo test -f '$sudoersPath' && echo exists || echo absent" `
+                -ErrorAction Stop
+
+            $fileExists   = ($existsResult.Output -join '').Trim() -eq 'exists'
+            $currentRules = @()
+
+            if ($fileExists) {
+                $catResult = Invoke-SSHCommand `
+                    -SessionId $session.SessionId `
+                    -Command   "sudo cat '$sudoersPath'" `
+                    -ErrorAction Stop
+
+                # Normalise to a clean string array: trim each line, drop
+                # blank lines that may result from a trailing newline.
+                $currentRules = @(
+                    ($catResult.Output -join "`n") -split "`n" |
+                    ForEach-Object { $_.Trim() } |
+                    Where-Object   { $_ -ne '' }
+                )
+            }
+
+            if ($desiredRules.Count -eq 0 -and -not $fileExists) {
+                # No rules desired, no file present - nothing to do.
+                Write-Host "[$name] user '$username': sudoers ok" `
+                    -ForegroundColor Green
+            }
+            elseif ($desiredRules.Count -eq 0 -and $fileExists) {
+                # Rules were removed from config - delete the file.
+                $r = Invoke-SSHCommand `
+                    -SessionId $session.SessionId `
+                    -Command   "sudo rm '$sudoersPath'" `
+                    -ErrorAction Stop
+
+                if ($r.ExitStatus -ne 0) {
+                    throw "[$name] Failed to remove sudoers file for '$username': $($r.Error)"
+                }
+
+                Write-Host "[$name] user '$username': sudoers removed" `
+                    -ForegroundColor Yellow
+            }
+            else {
+                # Compare current vs desired. Order is preserved: the file
+                # is written in the same order as the config array so that
+                # rule precedence matches the author's intent.
+                $rulesDrifted = ($currentRules -join "`n") -ne ($desiredRules -join "`n")
+
+                if (-not $rulesDrifted) {
+                    Write-Host "[$name] user '$username': sudoers ok" `
+                        -ForegroundColor Green
+                }
+                else {
+                    # Build file content: one rule per line, trailing newline.
+                    # Base64-encode so that special characters in rules
+                    # (wildcards, slashes, parentheses) survive the SSH
+                    # command string unmodified.
+                    $content = ($desiredRules -join "`n") + "`n"
+                    $b64     = [Convert]::ToBase64String(
+                                   [Text.Encoding]::UTF8.GetBytes($content))
+
+                    # Write content to a temp file via base64 decode.
+                    $r = Invoke-SSHCommand `
+                        -SessionId $session.SessionId `
+                        -Command   "echo '$b64' | base64 -d | sudo tee '$tmpPath' > /dev/null" `
+                        -ErrorAction Stop
+
+                    if ($r.ExitStatus -ne 0) {
+                        throw "[$name] Failed to write temp sudoers for '$username': $($r.Error)"
+                    }
+
+                    # chmod before visudo: some versions warn on world-readable
+                    # files even during a -c -f check.
+                    $r = Invoke-SSHCommand `
+                        -SessionId $session.SessionId `
+                        -Command   "sudo chmod 0440 '$tmpPath'" `
+                        -ErrorAction Stop
+
+                    if ($r.ExitStatus -ne 0) {
+                        Invoke-SSHCommand -SessionId $session.SessionId `
+                            -Command "sudo rm -f '$tmpPath'" | Out-Null
+                        throw "[$name] chmod failed on temp sudoers for '$username': $($r.Error)"
+                    }
+
+                    # Validate syntax. If this fails, remove the temp file and
+                    # abort - the live sudoers file is untouched.
+                    $r = Invoke-SSHCommand `
+                        -SessionId $session.SessionId `
+                        -Command   "sudo visudo -c -f '$tmpPath'" `
+                        -ErrorAction Stop
+
+                    if ($r.ExitStatus -ne 0) {
+                        Invoke-SSHCommand -SessionId $session.SessionId `
+                            -Command "sudo rm -f '$tmpPath'" | Out-Null
+                        throw "[$name] visudo validation failed for '$username': $($r.Output -join ' ')"
+                    }
+
+                    # Validation passed - move the temp file into place.
+                    $r = Invoke-SSHCommand `
+                        -SessionId $session.SessionId `
+                        -Command   "sudo mv '$tmpPath' '$sudoersPath'" `
+                        -ErrorAction Stop
+
+                    if ($r.ExitStatus -ne 0) {
+                        Invoke-SSHCommand -SessionId $session.SessionId `
+                            -Command "sudo rm -f '$tmpPath'" | Out-Null
+                        throw "[$name] Failed to install sudoers for '$username': $($r.Error)"
+                    }
+
+                    Write-Host "[$name] user '$username': sudoers updated" `
+                        -ForegroundColor Yellow
+                }
             }
         }
     }
@@ -308,7 +436,3 @@ foreach ($t in $reachable) {
         Remove-SSHSession -SessionId $session.SessionId | Out-Null
     }
 }
-
-# ---------------------------------------------------------------------------
-# TODO: Section 6 - sudoers reconciliation (/etc/sudoers.d/{username})
-# ---------------------------------------------------------------------------
