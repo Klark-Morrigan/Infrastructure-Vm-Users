@@ -299,6 +299,7 @@ foreach ($t in $reachable) {
                 else {
                     Write-Host "[$name] user '$username': ok" -ForegroundColor Green
                 }
+            }
 
             # -----------------------------------------------------------
             # 5b. Sudoers reconciliation
