@@ -53,6 +53,24 @@ function ConvertFrom-VmUsersConfigJson {
             -Fields  @('vmName', 'users') `
             -Context "VM entry"
 
+        # Validate the optional groups array when present.
+        # 'groups' is not in the required fields list above because omitting
+        # it is valid - it means no groups need to be explicitly declared for
+        # this VM. Get-Member is used to check presence without triggering
+        # StrictMode on a missing property.
+        $entryMembers = (Get-Member -InputObject $entry -MemberType NoteProperty).Name
+        if ($entryMembers -contains 'groups') {
+            # In PS 5.1 a single-element array in JSON is unwrapped to a bare
+            # object by ConvertFrom-Json. @() normalises to array.
+            $groups = @($entry.groups)
+            foreach ($group in $groups) {
+                Assert-ConfigFields `
+                    -Object  $group `
+                    -Fields  @('groupName') `
+                    -Context "Group in VM '$($entry.vmName)'"
+            }
+        }
+
         # In PS 5.1 a single-element array in JSON is unwrapped to a bare
         # object by ConvertFrom-Json. @() normalises to array.
         $users = @($entry.users)
