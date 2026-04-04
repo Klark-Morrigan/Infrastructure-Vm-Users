@@ -36,12 +36,14 @@ if (-not $_common -or $_common.Version -lt [Version]'1.0.0') {
 }
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
 
-# common.ps1 is dot-sourced after Infrastructure.Common is loaded so
-# Assert-RequiredProperties is available inside its function bodies.
+# Dot-source helpers after Infrastructure.Common is loaded so
+# Assert-RequiredProperties is available inside their function bodies.
 . "$PSScriptRoot\common.ps1"
+. "$PSScriptRoot\reconcile-groups.ps1"
+. "$PSScriptRoot\reconcile-users.ps1"
+. "$PSScriptRoot\reconcile-sudoers.ps1"
 
 # Infrastructure.Secrets must already be installed by setup-secrets.ps1.
-# RequiredModules in its manifest pulls in Infrastructure.Common automatically.
 Import-Module Infrastructure.Secrets                    -ErrorAction Stop
 Import-Module Microsoft.PowerShell.SecretManagement    -ErrorAction Stop
 
@@ -193,21 +195,6 @@ foreach ($t in $reachable) {
         -ErrorAction  Stop
 
     try {
-        # -------------------------------------------------------------------
-        # 5a. Group reconciliation
-        #     Must run before the user loop: useradd/usermod fail if a
-        #     referenced group does not yet exist.
-        #
-        #     Explicitly declared groups (from the 'groups' config array) are
-        #     processed first and support optional GID pinning and description.
-        #     GID conflict (group exists with a different GID) is an error -
-        #     silent renumbering would break ownership of files on disk.
-        #
-        #     Groups referenced in users[].groups but not declared explicitly
-        #     are created implicitly with no GID pinning as a fallback for
-        #     simple configs.
-        # -------------------------------------------------------------------
-
         # Get-Member is used to check for the optional 'groups' property
         # without triggering StrictMode on a missing key.
         $entryMembers   = (Get-Member -InputObject $t.Entry -MemberType NoteProperty).Name
@@ -217,361 +204,25 @@ foreach ($t in $reachable) {
             @()
         }
 
-        # Track declared names so the implicit fallback skips them.
-        $declaredGroupNames = [System.Collections.Generic.HashSet[string]]::new(
-            [System.StringComparer]::OrdinalIgnoreCase)
-
-        foreach ($group in $declaredGroups) {
-            $groupName   = $group.groupName
-            # gid and description are optional - missing properties return
-            # $null under StrictMode when accessed on a PSCustomObject that
-            # lacks them; use Get-Member to guard.
-            $groupMembers = (Get-Member -InputObject $group -MemberType NoteProperty).Name
-            $gid          = if ($groupMembers -contains 'gid')         { $group.gid }         else { $null }
-            $description  = if ($groupMembers -contains 'description') { $group.description } else { $null }
-
-            $null = $declaredGroupNames.Add($groupName)
-
-            $getentResult = Invoke-SSHCommand `
-                -SessionId $session.SessionId `
-                -Command   "getent group '$groupName'" `
-                -ErrorAction Stop
-
-            if ($getentResult.ExitStatus -ne 0) {
-                # Group absent - create it, optionally with a pinned GID.
-                $createCmd = 'sudo groupadd'
-                if ($null -ne $gid -and "$gid" -ne '') {
-                    $createCmd += " -g $gid"
-                }
-                $createCmd += " '$groupName'"
-
-                $r = Invoke-SSHCommand `
-                    -SessionId $session.SessionId `
-                    -Command   $createCmd `
-                    -ErrorAction Stop
-
-                if ($r.ExitStatus -ne 0) {
-                    throw "[$name] groupadd failed for '$groupName': $($r.Error)"
-                }
-
-                # Write description to /etc/gshadow (informational only;
-                # not read back for reconciliation - always overwritten).
-                if ($null -ne $description -and "$description" -ne '') {
-                    $r = Invoke-SSHCommand `
-                        -SessionId $session.SessionId `
-                        -Command   "sudo gpasswd --comment '$description' '$groupName'" `
-                        -ErrorAction Stop
-
-                    if ($r.ExitStatus -ne 0) {
-                        throw "[$name] gpasswd --comment failed for '$groupName': $($r.Error)"
-                    }
-                }
-
-                Write-Host "[$name] group '$groupName': created" -ForegroundColor Green
-            }
-            else {
-                # Group exists - check GID if one was declared.
-                if ($null -ne $gid -and "$gid" -ne '') {
-                    # getent group output format: name:password:gid:members
-                    $currentGid = (($getentResult.Output -join '').Trim() -split ':')[2]
-
-                    if ($currentGid -ne "$gid") {
-                        throw (
-                            "[$name] group '$groupName' exists with GID $currentGid " +
-                            "but config requires GID $gid. Correct manually: " +
-                            "sudo groupmod -g $gid '$groupName' " +
-                            "(verify no files are owned by GID $currentGid first: " +
-                            "find / -gid $currentGid 2>/dev/null)"
-                        )
-                    }
-                }
-
-                Write-Host "[$name] group '$groupName': ok" -ForegroundColor Green
-            }
-        }
-
-        # Implicit fallback: groups referenced in users[].groups but not
-        # declared in the groups array are created with no GID pinning.
-        $allReferencedGroups = @(
-            $users |
-            ForEach-Object { @($_.groups) } |
-            Where-Object   { $_ -ne '' } |
-            Sort-Object -Unique
-        )
-
-        foreach ($groupName in $allReferencedGroups) {
-            if ($declaredGroupNames.Contains($groupName)) {
-                continue  # Already handled in the explicit pass above.
-            }
-
-            $getentResult = Invoke-SSHCommand `
-                -SessionId $session.SessionId `
-                -Command   "getent group '$groupName'" `
-                -ErrorAction Stop
-
-            if ($getentResult.ExitStatus -ne 0) {
-                $r = Invoke-SSHCommand `
-                    -SessionId $session.SessionId `
-                    -Command   "sudo groupadd '$groupName'" `
-                    -ErrorAction Stop
-
-                if ($r.ExitStatus -ne 0) {
-                    throw "[$name] groupadd failed for '$groupName': $($r.Error)"
-                }
-
-                Write-Host "[$name] group '$groupName': created (implicit)" `
-                    -ForegroundColor Green
-            }
-            else {
-                Write-Host "[$name] group '$groupName': ok" -ForegroundColor Green
-            }
-        }
-
-        # -------------------------------------------------------------------
-        # 5b. User reconciliation
-        # -------------------------------------------------------------------
+        # 5a. Groups must exist before users reference them in useradd/usermod.
+        Invoke-GroupReconciliation `
+            -SessionId      $session.SessionId `
+            -VmName         $name `
+            -DeclaredGroups $declaredGroups `
+            -Users          $users
 
         foreach ($user in $users) {
-            $username = $user.username
-            $shell    = $user.shell
-            $homeDir  = $user.homeDir
-            # @() normalises PS 5.1 single-element JSON unwrapping to array.
-            $groups   = @($user.groups)
-
-            # Check if the user already exists.
-            # 'id' exits 0 if the user exists, non-zero otherwise.
-
-            $idResult = Invoke-SSHCommand `
+            # 5b. Ensure the user exists with the correct shell and groups.
+            Invoke-UserReconciliation `
                 -SessionId $session.SessionId `
-                -Command   "id '$username'" `
-                -ErrorAction Stop
+                -VmName    $name `
+                -User      $user
 
-            if ($idResult.ExitStatus -ne 0) {
-                # -------------------------------------------------------
-                # User does not exist - create with useradd.
-                #   -m : create home directory if it does not exist
-                #   -d : home directory path
-                #   -s : login shell
-                #   -G : supplementary groups (omitted when list is empty
-                #        to avoid an error on an empty group argument)
-                # -------------------------------------------------------
-
-                $cmd = "sudo useradd -m -d '$homeDir' -s '$shell'"
-                if ($groups.Count -gt 0) {
-                    $cmd += " -G '$($groups -join ',')'"
-                }
-                $cmd += " '$username'"
-
-                $r = Invoke-SSHCommand `
-                    -SessionId $session.SessionId `
-                    -Command   $cmd `
-                    -ErrorAction Stop
-
-                if ($r.ExitStatus -ne 0) {
-                    throw "[$name] useradd failed for '$username': $($r.Error)"
-                }
-
-                Write-Host "[$name] user '$username': created" `
-                    -ForegroundColor Green
-            }
-            else {
-                # -------------------------------------------------------
-                # User exists - reconcile shell and supplementary groups.
-                # homeDir is not reconciled: moving a home directory risks
-                # data loss and is intentionally left as a manual step.
-                # -------------------------------------------------------
-
-                # getent passwd is preferred over parsing /etc/passwd
-                # because it also handles LDAP/NIS accounts.
-                $shellResult = Invoke-SSHCommand `
-                    -SessionId $session.SessionId `
-                    -Command   "getent passwd '$username' | cut -d: -f7" `
-                    -ErrorAction Stop
-
-                $currentShell = ($shellResult.Output -join '').Trim()
-
-                # id -Gn returns all groups including the primary group
-                # (which has the same name as the username on Ubuntu).
-                # Strip the primary group to isolate supplementary groups,
-                # then sort for a stable string comparison.
-                $gnResult = Invoke-SSHCommand `
-                    -SessionId $session.SessionId `
-                    -Command   "id -Gn '$username'" `
-                    -ErrorAction Stop
-
-                $currentGroups = @(
-                    ($gnResult.Output -join '').Trim() -split '\s+' |
-                    Where-Object { $_ -ne $username } |
-                    Sort-Object
-                )
-                $desiredGroups = @($groups | Sort-Object)
-
-                $shellDrifted  = $currentShell -ne $shell
-                # Join sorted arrays as comma strings for a simple equality
-                # check that handles empty arrays correctly in PS 5.1.
-                $groupsDrifted = ($currentGroups -join ',') -ne ($desiredGroups -join ',')
-
-                if ($shellDrifted -or $groupsDrifted) {
-                    # usermod -G replaces the full supplementary group list.
-                    # An empty string removes all supplementary groups.
-                    $groupArg  = $groups -join ','
-                    $updateCmd = "sudo usermod -s '$shell' -G '$groupArg' '$username'"
-
-                    $r = Invoke-SSHCommand `
-                        -SessionId $session.SessionId `
-                        -Command   $updateCmd `
-                        -ErrorAction Stop
-
-                    if ($r.ExitStatus -ne 0) {
-                        throw "[$name] usermod failed for '$username': $($r.Error)"
-                    }
-
-                    $changes = @()
-                    if ($shellDrifted) {
-                        $changes += "shell: '$currentShell' -> '$shell'"
-                    }
-                    if ($groupsDrifted) {
-                        $changes += "groups: [$($currentGroups -join ', ')] -> [$($desiredGroups -join ', ')]"
-                    }
-
-                    Write-Host "[$name] user '$username': updated ($($changes -join '; '))" `
-                        -ForegroundColor Yellow
-                }
-                else {
-                    Write-Host "[$name] user '$username': ok" -ForegroundColor Green
-                }
-            }
-
-            # -----------------------------------------------------------
-            # 5c. Sudoers reconciliation
-            #     Runs for all users regardless of whether they were just
-            #     created or already existed. Each user gets its own
-            #     /etc/sudoers.d/{username} file so edits are isolated per
-            #     user. We write to a temp file, chmod, and validate with
-            #     visudo before moving it into place. The live file is never
-            #     touched if validation fails, so a bad rule cannot lock
-            #     out sudo.
-            # -----------------------------------------------------------
-
-            # @() normalises PS 5.1 single-element JSON unwrapping to array.
-            $desiredRules = @($user.sudoersRules)
-            $sudoersPath  = "/etc/sudoers.d/$username"
-            $tmpPath      = "/tmp/.sudoers_tmp_$username"
-
-            # Read current rules; treat an absent file as empty.
-            $existsResult = Invoke-SSHCommand `
+            # 5c. Ensure the sudoers file matches desired rules.
+            Invoke-SudoersReconciliation `
                 -SessionId $session.SessionId `
-                -Command   "sudo test -f '$sudoersPath' && echo exists || echo absent" `
-                -ErrorAction Stop
-
-            $fileExists   = ($existsResult.Output -join '').Trim() -eq 'exists'
-            $currentRules = @()
-
-            if ($fileExists) {
-                $catResult = Invoke-SSHCommand `
-                    -SessionId $session.SessionId `
-                    -Command   "sudo cat '$sudoersPath'" `
-                    -ErrorAction Stop
-
-                # Normalise to a clean string array: trim each line, drop
-                # blank lines that may result from a trailing newline.
-                $currentRules = @(
-                    ($catResult.Output -join "`n") -split "`n" |
-                    ForEach-Object { $_.Trim() } |
-                    Where-Object   { $_ -ne '' }
-                )
-            }
-
-            if ($desiredRules.Count -eq 0 -and -not $fileExists) {
-                # No rules desired, no file present - nothing to do.
-                Write-Host "[$name] user '$username': sudoers ok" `
-                    -ForegroundColor Green
-            }
-            elseif ($desiredRules.Count -eq 0 -and $fileExists) {
-                # Rules were removed from config - delete the file.
-                $r = Invoke-SSHCommand `
-                    -SessionId $session.SessionId `
-                    -Command   "sudo rm '$sudoersPath'" `
-                    -ErrorAction Stop
-
-                if ($r.ExitStatus -ne 0) {
-                    throw "[$name] Failed to remove sudoers file for '$username': $($r.Error)"
-                }
-
-                Write-Host "[$name] user '$username': sudoers removed" `
-                    -ForegroundColor Yellow
-            }
-            else {
-                # Compare current vs desired. Order is preserved: the file
-                # is written in the same order as the config array so that
-                # rule precedence matches the author's intent.
-                $rulesDrifted = ($currentRules -join "`n") -ne ($desiredRules -join "`n")
-
-                if (-not $rulesDrifted) {
-                    Write-Host "[$name] user '$username': sudoers ok" `
-                        -ForegroundColor Green
-                }
-                else {
-                    # Build file content: one rule per line, trailing newline.
-                    # Base64-encode so that special characters in rules
-                    # (wildcards, slashes, parentheses) survive the SSH
-                    # command string unmodified.
-                    $content = ($desiredRules -join "`n") + "`n"
-                    $b64     = [Convert]::ToBase64String(
-                                   [Text.Encoding]::UTF8.GetBytes($content))
-
-                    # Write content to a temp file via base64 decode.
-                    $r = Invoke-SSHCommand `
-                        -SessionId $session.SessionId `
-                        -Command   "echo '$b64' | base64 -d | sudo tee '$tmpPath' > /dev/null" `
-                        -ErrorAction Stop
-
-                    if ($r.ExitStatus -ne 0) {
-                        throw "[$name] Failed to write temp sudoers for '$username': $($r.Error)"
-                    }
-
-                    # chmod before visudo: some versions warn on world-readable
-                    # files even during a -c -f check.
-                    $r = Invoke-SSHCommand `
-                        -SessionId $session.SessionId `
-                        -Command   "sudo chmod 0440 '$tmpPath'" `
-                        -ErrorAction Stop
-
-                    if ($r.ExitStatus -ne 0) {
-                        Invoke-SSHCommand -SessionId $session.SessionId `
-                            -Command "sudo rm -f '$tmpPath'" | Out-Null
-                        throw "[$name] chmod failed on temp sudoers for '$username': $($r.Error)"
-                    }
-
-                    # Validate syntax. If this fails, remove the temp file and
-                    # abort - the live sudoers file is untouched.
-                    $r = Invoke-SSHCommand `
-                        -SessionId $session.SessionId `
-                        -Command   "sudo visudo -c -f '$tmpPath'" `
-                        -ErrorAction Stop
-
-                    if ($r.ExitStatus -ne 0) {
-                        Invoke-SSHCommand -SessionId $session.SessionId `
-                            -Command "sudo rm -f '$tmpPath'" | Out-Null
-                        throw "[$name] visudo validation failed for '$username': $($r.Output -join ' ')"
-                    }
-
-                    # Validation passed - move the temp file into place.
-                    $r = Invoke-SSHCommand `
-                        -SessionId $session.SessionId `
-                        -Command   "sudo mv '$tmpPath' '$sudoersPath'" `
-                        -ErrorAction Stop
-
-                    if ($r.ExitStatus -ne 0) {
-                        Invoke-SSHCommand -SessionId $session.SessionId `
-                            -Command "sudo rm -f '$tmpPath'" | Out-Null
-                        throw "[$name] Failed to install sudoers for '$username': $($r.Error)"
-                    }
-
-                    Write-Host "[$name] user '$username': sudoers updated" `
-                        -ForegroundColor Yellow
-                }
-            }
+                -VmName    $name `
+                -User      $user
         }
     }
     finally {
