@@ -35,9 +35,15 @@ function Invoke-UserReconciliation {
 
     # groups is optional in the config schema - guard with Get-Member so that
     # user objects without the property do not throw under StrictMode.
+    # NOTE: do not use the if/else expression form here - see reconcile-sudoers.ps1
+    # for the reason (empty @() collapses to $null in a pipeline expression).
     $userMembers = (Get-Member -InputObject $User -MemberType NoteProperty).Name
     # @() normalises PS 5.1 single-element JSON unwrapping to an array.
-    $groups      = if ($userMembers -contains 'groups') { @($User.groups) } else { @() }
+    if ($userMembers -contains 'groups') {
+        $groups = @($User.groups)
+    } else {
+        $groups = @()
+    }
 
     # 'id' exits 0 if the user exists, non-zero otherwise.
     $idResult = Invoke-SSHCommand `
