@@ -49,6 +49,8 @@ function ConvertFrom-VmUsersConfigJson {
     # It handles the PS 5.1-compatible Get-Member loop and IsNullOrWhiteSpace
     # cast so this file does not need to duplicate that logic.
     foreach ($entry in $entries) {
+        # Assert-RequiredProperties handles arrays correctly (count-based check)
+        # so users can be included alongside the scalar vmName.
         Assert-RequiredProperties `
             -Object     $entry `
             -Properties @('vmName', 'users') `
@@ -72,8 +74,7 @@ function ConvertFrom-VmUsersConfigJson {
             }
         }
 
-        # In PS 5.1 a single-element array in JSON is unwrapped to a bare
-        # object by ConvertFrom-Json. @() normalises to array.
+        # @() normalises the PS 5.1 single-element unwrap (see groups above).
         $users = @($entry.users)
 
         if ($users.Count -eq 0) {

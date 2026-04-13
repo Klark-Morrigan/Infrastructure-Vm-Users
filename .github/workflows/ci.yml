@@ -1,43 +1,13 @@
 name: CI
 
+# Delegates to the shared PowerShell CI workflow in Infrastructure-Common.
+# Kept as a local file so the pull_request trigger works for this repo,
+# and so other workflows can call it via workflow_call.
 on:
-  push:
-    branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
   workflow_call:
 
 jobs:
-  ci-ps51:
-    name: CI (PowerShell 5.1)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Run Pester tests
-        shell: powershell
-        run: .\Run-Tests.ps1
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-results-ps51
-          path: TestResults.xml
-
-  ci-ps7:
-    name: CI (PowerShell 7)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Run Pester tests
-        shell: pwsh
-        run: .\Run-Tests.ps1
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-results-ps7
-          path: TestResults.xml
+  ci:
+    uses: VitaliiAndreev/Infrastructure-Common/.github/workflows/ci-powershell.yml@master
