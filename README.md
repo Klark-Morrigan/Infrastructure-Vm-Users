@@ -11,6 +11,7 @@ a local encrypted vault.
 - [Quick start](#quick-start)
 - [Config reference](#config-reference)
 - [Reconciliation behaviour](#reconciliation-behaviour)
+- [CI](#ci)
 - [Repo structure](#repo-structure)
 
 ---
@@ -194,20 +195,45 @@ provisioner config by `vmName`.
 
 ---
 
+## CI
+
+CI runs on pull requests targeting `master` via `.github/workflows/ci.yml`,
+which delegates to the shared reusable workflow in
+[Infrastructure-Common](https://github.com/VitaliiAndreev/Infrastructure-Common):
+
+```
+VitaliiAndreev/Infrastructure-Common/.github/workflows/ci-powershell.yml@master
+```
+
+The shared workflow runs `Run-Tests.ps1` on both PowerShell 5.1 and 7.
+No additional CI configuration is needed in this repo.
+
+---
+
 ## Repo structure
 
 ```
-hyper-v/
-└── ubuntu/
-    ├── common.ps1          # Shared helpers (dot-sourced, not run directly)
-    ├── setup-secrets.ps1   # One-time vault setup
-    └── create-users.ps1    # User + sudoers reconciliation
-docs/
-└── dev/
-    └── implementation/
-        └── 01 - initial implementation/
-            ├── problem.md
-            └── plan.md
+Infrastructure-Vm-Users/
+|- .github/
+|  `- workflows/
+|     `- ci.yml                  # Delegates to shared ci-powershell.yml in Infrastructure-Common
+|- hyper-v/
+|  `- ubuntu/
+|     |- create-users.ps1        # Entry point - reconciles groups, users, and sudoers
+|     |- setup-secrets.ps1       # One-time vault setup
+|     |- common.ps1              # Shared helpers (dot-sourced, not run directly)
+|     |- reconcile-groups.ps1    # Group reconciliation logic
+|     |- reconcile-users.ps1     # User reconciliation logic
+|     `- reconcile-sudoers.ps1   # Sudoers reconciliation logic
+|- Tests/               # Pester unit tests
+|- docs/
+|  `- dev/
+|     `- implementation/
+|        `- 01 - initial implementation/
+|           |- problem.md
+|           `- plan.md
+|- Run-Tests.ps1     # Runs Pester tests (called by ci-powershell.yml)
+`- README.md
 ```
 
 [Infrastructure-Vm-Provisioner]: ../Infrastructure-Vm-Provisioner
