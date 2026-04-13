@@ -25,8 +25,8 @@ BeforeAll {
 "@
     }
 
-    # Wraps one or more entry JSON strings into a JSON array string.
-    function Wrap-Array([string[]] $items) {
+    # Joins one or more entry JSON strings into a JSON array string.
+    function ConvertTo-JsonArray([string[]] $items) {
         '[' + ($items -join ', ') + ']'
     }
 }
@@ -38,7 +38,7 @@ Describe 'ConvertFrom-VmUsersConfigJson' {
     # ------------------------------------------------------------------
 
         It 'returns a VM entry for a single-element JSON array' {
-            $result = @(ConvertFrom-VmUsersConfigJson -Json (Wrap-Array (New-ValidEntryJson)))
+            $result = @(ConvertFrom-VmUsersConfigJson -Json (ConvertTo-JsonArray (New-ValidEntryJson)))
             $result | Should -HaveCount 1
             $result[0].vmName | Should -Be 'node-01'
         }
@@ -52,7 +52,7 @@ Describe 'ConvertFrom-VmUsersConfigJson' {
         }
 
         It 'returns all entries for a multi-VM JSON array' {
-            $json = Wrap-Array (New-ValidEntryJson 'node-01'), (New-ValidEntryJson 'node-02')
+            $json = ConvertTo-JsonArray (New-ValidEntryJson 'node-01'), (New-ValidEntryJson 'node-02')
             $result = @(ConvertFrom-VmUsersConfigJson -Json $json)
             $result | Should -HaveCount 2
             $result[0].vmName | Should -Be 'node-01'
@@ -72,7 +72,7 @@ Describe 'ConvertFrom-VmUsersConfigJson' {
 
         It 'accepts an entry without a groups property' {
             # groups is optional - omitting it entirely must not throw.
-            { @(ConvertFrom-VmUsersConfigJson -Json (Wrap-Array (New-ValidEntryJson))) } |
+            { @(ConvertFrom-VmUsersConfigJson -Json (ConvertTo-JsonArray (New-ValidEntryJson))) } |
                 Should -Not -Throw
         }
     }
@@ -110,18 +110,18 @@ Describe 'ConvertFrom-VmUsersConfigJson' {
     Context 'VM-level field validation' {
     # ------------------------------------------------------------------
 
-        It 'calls Assert-RequiredProperties for vmName and users on each VM' {
+        It 'calls Assert-RequiredProperties once per VM entry and once per user' {
             Mock Assert-RequiredProperties {}
-            $json = Wrap-Array (New-ValidEntryJson 'node-01'), (New-ValidEntryJson 'node-02')
+            $json = ConvertTo-JsonArray (New-ValidEntryJson 'node-01'), (New-ValidEntryJson 'node-02')
             @(ConvertFrom-VmUsersConfigJson -Json $json)
-            # Once per VM entry (vmName + users check), once per user (username,
-            # shell, homeDir check) - 2 VMs x 2 calls each = 4 total.
+            # 1 VM-level call (vmName + users) + 1 user-level call per VM = 2 per VM.
+            # 2 VMs * 2 = 4 total.
             Should -Invoke Assert-RequiredProperties -Times 4 -Exactly
         }
 
-        It 'passes vmName and users in the Properties for the VM-level call' {
+        It 'passes vmName and users in Properties for the VM-level call' {
             Mock Assert-RequiredProperties {}
-            @(ConvertFrom-VmUsersConfigJson -Json (Wrap-Array (New-ValidEntryJson)))
+            @(ConvertFrom-VmUsersConfigJson -Json (ConvertTo-JsonArray (New-ValidEntryJson)))
             Should -Invoke Assert-RequiredProperties -Times 1 -Exactly -ParameterFilter {
                 $Properties -contains 'vmName' -and $Properties -contains 'users'
             }
@@ -129,11 +129,25 @@ Describe 'ConvertFrom-VmUsersConfigJson' {
 
         It 'throws when Assert-RequiredProperties throws for a VM entry' {
             Mock Assert-RequiredProperties { throw "VM entry is missing required property 'vmName'." }
-            { ConvertFrom-VmUsersConfigJson -Json (Wrap-Array (New-ValidEntryJson)) } |
+            { ConvertFrom-VmUsersConfigJson -Json (ConvertTo-JsonArray (New-ValidEntryJson)) } |
                 Should -Throw -ExpectedMessage "*missing required property*"
         }
 
+        It 'propagates a missing-users error from Assert-RequiredProperties' {
+            # The BeforeAll stub is a no-op, so simulate the real
+            # Assert-RequiredProperties detecting the absent property.
+            Mock Assert-RequiredProperties {
+                throw "VM entry is missing required property 'users'."
+            }
+            { ConvertFrom-VmUsersConfigJson -Json '[{ "vmName": "node-01" }]' } |
+                Should -Throw -ExpectedMessage "*missing required property 'users'*"
+        }
+
         It 'throws when the users array is empty' {
+            # Assert-RequiredProperties is stubbed as a no-op, so the
+            # count check further down is what fires here.
+            # The real Assert-RequiredProperties (tested in Infrastructure.Common)
+            # catches this earlier with "empty required property 'users'".
             $json = '[{ "vmName": "node-01", "users": [] }]'
             { ConvertFrom-VmUsersConfigJson -Json $json } |
                 Should -Throw -ExpectedMessage "*at least one user*"
@@ -162,7 +176,7 @@ Describe 'ConvertFrom-VmUsersConfigJson' {
 
         It 'passes username, shell, and homeDir in the Properties for user-level calls' {
             Mock Assert-RequiredProperties {}
-            @(ConvertFrom-VmUsersConfigJson -Json (Wrap-Array (New-ValidEntryJson)))
+            @(ConvertFrom-VmUsersConfigJson -Json (ConvertTo-JsonArray (New-ValidEntryJson)))
             Should -Invoke Assert-RequiredProperties -Times 1 -Exactly -ParameterFilter {
                 $Properties -contains 'username' -and
                 $Properties -contains 'shell'    -and
@@ -172,7 +186,7 @@ Describe 'ConvertFrom-VmUsersConfigJson' {
 
         It 'includes the vmName in the Context for user-level calls' {
             Mock Assert-RequiredProperties {}
-            @(ConvertFrom-VmUsersConfigJson -Json (Wrap-Array (New-ValidEntryJson 'node-01')))
+            @(ConvertFrom-VmUsersConfigJson -Json (ConvertTo-JsonArray (New-ValidEntryJson 'node-01')))
             Should -Invoke Assert-RequiredProperties -Times 1 -Exactly -ParameterFilter {
                 $Properties -contains 'username' -and $Context -like "*node-01*"
             }
@@ -187,7 +201,7 @@ Describe 'ConvertFrom-VmUsersConfigJson' {
                 }
                 $script:_vmCallDone = $true
             }
-            { ConvertFrom-VmUsersConfigJson -Json (Wrap-Array (New-ValidEntryJson)) } |
+            { ConvertFrom-VmUsersConfigJson -Json (ConvertTo-JsonArray (New-ValidEntryJson)) } |
                 Should -Throw -ExpectedMessage "*missing required property 'shell'*"
         }
     }
@@ -245,7 +259,7 @@ Describe 'ConvertFrom-VmUsersConfigJson' {
 
         It 'skips group validation when groups property is absent' {
             Mock Assert-RequiredProperties {}
-            @(ConvertFrom-VmUsersConfigJson -Json (Wrap-Array (New-ValidEntryJson)))
+            @(ConvertFrom-VmUsersConfigJson -Json (ConvertTo-JsonArray (New-ValidEntryJson)))
             # Only the VM-level and user-level calls - no group calls.
             Should -Invoke Assert-RequiredProperties -Times 0 -Exactly -ParameterFilter {
                 $Properties -contains 'groupName'
