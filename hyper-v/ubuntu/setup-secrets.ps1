@@ -53,7 +53,7 @@ $ErrorActionPreference = 'Stop'
 # that hasn't been installed yet.
 $_common = Get-Module -ListAvailable -Name Infrastructure.Common |
     Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'1.0.0') {
+if (-not $_common -or $_common.Version -lt [Version]'1.0.3') {
     Install-Module Infrastructure.Common -Scope CurrentUser -Force
 }
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
@@ -64,7 +64,7 @@ Import-Module Infrastructure.Common -Force -ErrorAction Stop
 . "$PSScriptRoot\common.ps1"
 
 # The minimum version is pinned here - bump it when a newer feature is required.
-Invoke-ModuleInstall -ModuleName 'Infrastructure.Secrets' -MinimumVersion '2.0.0'
+Invoke-ModuleInstall -ModuleName 'Infrastructure.Secrets' -MinimumVersion '2.0.1'
 
 Initialize-InfrastructureVault `
     -VaultName  'VmUsers' `
