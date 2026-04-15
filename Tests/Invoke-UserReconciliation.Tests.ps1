@@ -28,8 +28,15 @@ Describe 'Invoke-UserReconciliation' {
             # groups is optional in the config schema. A user object without
             # the property must not throw under Set-StrictMode -Version Latest.
             Mock Invoke-SSHCommand {
-                if ($Command -like 'id*') { New-SshResult 1 }
-                else                      { New-SshResult 0 }
+                if ($Command -like 'id*') {
+                    New-SshResult 1
+                }
+                elseif ($Command -like 'getent group*') {
+                    New-SshResult 1
+                }
+                else {
+                    New-SshResult 0
+                }
             }
             $userWithNoGroupsProperty = [PSCustomObject]@{
                 username = 'u-deploy'; shell = '/bin/bash'; homeDir = '/home/u-deploy'
@@ -48,9 +55,15 @@ Describe 'Invoke-UserReconciliation' {
 
         It 'calls useradd when the user is absent' {
             Mock Invoke-SSHCommand {
-                # id check: user absent. useradd: ok.
-                if ($Command -like 'id*') { New-SshResult 1 }
-                else                      { New-SshResult 0 }
+                if ($Command -like 'id*') {
+                    New-SshResult 1
+                }
+                elseif ($Command -like 'getent group*') {
+                    New-SshResult 1
+                }
+                else {
+                    New-SshResult 0
+                }
             }
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy')
@@ -61,8 +74,15 @@ Describe 'Invoke-UserReconciliation' {
 
         It 'includes -G when the user has supplementary groups' {
             Mock Invoke-SSHCommand {
-                if ($Command -like 'id*') { New-SshResult 1 }
-                else                      { New-SshResult 0 }
+                if ($Command -like 'id*') {
+                    New-SshResult 1
+                }
+                elseif ($Command -like 'getent group*') {
+                    New-SshResult 1
+                }
+                else {
+                    New-SshResult 0
+                }
             }
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker', 'runners'))
@@ -73,8 +93,15 @@ Describe 'Invoke-UserReconciliation' {
 
         It 'omits -G when the user has no supplementary groups' {
             Mock Invoke-SSHCommand {
-                if ($Command -like 'id*') { New-SshResult 1 }
-                else                      { New-SshResult 0 }
+                if ($Command -like 'id*') {
+                    New-SshResult 1
+                }
+                elseif ($Command -like 'getent group*') {
+                    New-SshResult 1
+                }
+                else {
+                    New-SshResult 0
+                }
             }
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy')
@@ -83,10 +110,57 @@ Describe 'Invoke-UserReconciliation' {
             }
         }
 
+        It 'passes -g when a primary group with the same name already exists' {
+            # Reproduces the case where the group was declared in the groups
+            # config and created before user reconciliation runs.
+            Mock Invoke-SSHCommand {
+                if ($Command -like 'id*') {
+                    New-SshResult 1
+                }
+                elseif ($Command -like 'getent group*') {
+                    New-SshResult 0
+                }
+                else {
+                    New-SshResult 0
+                }
+            }
+            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+                -User (New-User 'u-actions-runner')
+            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+                $Command -like "*useradd*-g*u-actions-runner*"
+            }
+        }
+
+        It 'omits -g when no primary group with the same name exists' {
+            Mock Invoke-SSHCommand {
+                if ($Command -like 'id*') {
+                    New-SshResult 1
+                }
+                elseif ($Command -like 'getent group*') {
+                    New-SshResult 1
+                }
+                else {
+                    New-SshResult 0
+                }
+            }
+            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+                -User (New-User 'u-deploy')
+            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+                $Command -like '*useradd* -g *'
+            }
+        }
+
         It 'throws when useradd fails' {
             Mock Invoke-SSHCommand {
-                if ($Command -like 'id*') { New-SshResult 1 }
-                else                      { New-SshResult 1 @() 'permission denied' }
+                if ($Command -like 'id*') {
+                    New-SshResult 1
+                }
+                elseif ($Command -like 'getent group*') {
+                    New-SshResult 1
+                }
+                else {
+                    New-SshResult 1 @() 'permission denied'
+                }
             }
             { Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy') } |
@@ -104,9 +178,15 @@ Describe 'Invoke-UserReconciliation' {
             # and requires careful coordination, so it is left as a manual
             # operation. A changed homeDir in config must never trigger usermod.
             Mock Invoke-SSHCommand {
-                if ($Command -like "id '*'")    { New-SshResult 0 }
-                if ($Command -like 'getent*') { New-SshResult 0 @('/bin/bash') }
-                if ($Command -like 'id -Gn*') { New-SshResult 0 @('u-deploy') }
+                if ($Command -like "id '*'") {
+                    New-SshResult 0
+                }
+                if ($Command -like 'getent*') {
+                    New-SshResult 0 @('/bin/bash')
+                }
+                if ($Command -like 'id -Gn*') {
+                    New-SshResult 0 @('u-deploy')
+                }
             }
             # Desired homeDir differs from the conventional path - must be ignored.
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
@@ -118,9 +198,15 @@ Describe 'Invoke-UserReconciliation' {
 
         It 'does not call usermod when shell and groups are correct' {
             Mock Invoke-SSHCommand {
-                if ($Command -like 'id*')         { New-SshResult 0 }
-                if ($Command -like 'getent*')      { New-SshResult 0 @('/bin/bash') }
-                if ($Command -like 'id -Gn*')      { New-SshResult 0 @('u-deploy docker') }
+                if ($Command -like 'id*') {
+                    New-SshResult 0
+                }
+                if ($Command -like 'getent*') {
+                    New-SshResult 0 @('/bin/bash')
+                }
+                if ($Command -like 'id -Gn*') {
+                    New-SshResult 0 @('u-deploy docker')
+                }
             }
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker'))
@@ -136,10 +222,18 @@ Describe 'Invoke-UserReconciliation' {
 
         It 'calls usermod when the shell has changed' {
             Mock Invoke-SSHCommand {
-                if ($Command -like "id '*'")    { New-SshResult 0 }
-                if ($Command -like 'getent*') { New-SshResult 0 @('/bin/sh') }
-                if ($Command -like 'id -Gn*') { New-SshResult 0 @('u-deploy') }
-                if ($Command -like '*usermod*') { New-SshResult 0 }
+                if ($Command -like "id '*'") {
+                    New-SshResult 0
+                }
+                if ($Command -like 'getent*') {
+                    New-SshResult 0 @('/bin/sh')
+                }
+                if ($Command -like 'id -Gn*') {
+                    New-SshResult 0 @('u-deploy')
+                }
+                if ($Command -like '*usermod*') {
+                    New-SshResult 0
+                }
             }
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash')
@@ -150,10 +244,18 @@ Describe 'Invoke-UserReconciliation' {
 
         It 'throws when usermod fails' {
             Mock Invoke-SSHCommand {
-                if ($Command -like "id '*'")      { New-SshResult 0 }
-                if ($Command -like 'getent*')   { New-SshResult 0 @('/bin/sh') }
-                if ($Command -like 'id -Gn*')   { New-SshResult 0 @('u-deploy') }
-                if ($Command -like '*usermod*')  { New-SshResult 1 @() 'permission denied' }
+                if ($Command -like "id '*'") {
+                    New-SshResult 0
+                }
+                if ($Command -like 'getent*') {
+                    New-SshResult 0 @('/bin/sh')
+                }
+                if ($Command -like 'id -Gn*') {
+                    New-SshResult 0 @('u-deploy')
+                }
+                if ($Command -like '*usermod*') {
+                    New-SshResult 1 @() 'permission denied'
+                }
             }
             { Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash') } |
@@ -167,11 +269,19 @@ Describe 'Invoke-UserReconciliation' {
 
         It 'calls usermod when supplementary groups have changed' {
             Mock Invoke-SSHCommand {
-                if ($Command -like "id '*'")      { New-SshResult 0 }
-                if ($Command -like 'getent*')   { New-SshResult 0 @('/bin/bash') }
+                if ($Command -like "id '*'") {
+                    New-SshResult 0
+                }
+                if ($Command -like 'getent*') {
+                    New-SshResult 0 @('/bin/bash')
+                }
                 # Current groups: only primary. Desired: docker added.
-                if ($Command -like 'id -Gn*')   { New-SshResult 0 @('u-deploy') }
-                if ($Command -like '*usermod*')  { New-SshResult 0 }
+                if ($Command -like 'id -Gn*') {
+                    New-SshResult 0 @('u-deploy')
+                }
+                if ($Command -like '*usermod*') {
+                    New-SshResult 0
+                }
             }
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker'))
@@ -184,11 +294,19 @@ Describe 'Invoke-UserReconciliation' {
             # usermod -G '' removes all supplementary groups. An empty desired
             # list must not be skipped - it is a deliberate removal.
             Mock Invoke-SSHCommand {
-                if ($Command -like "id '*'")      { New-SshResult 0 }
-                if ($Command -like 'getent*')   { New-SshResult 0 @('/bin/bash') }
+                if ($Command -like "id '*'") {
+                    New-SshResult 0
+                }
+                if ($Command -like 'getent*') {
+                    New-SshResult 0 @('/bin/bash')
+                }
                 # Current: user is in docker. Desired: no supplementary groups.
-                if ($Command -like 'id -Gn*')   { New-SshResult 0 @('u-deploy docker') }
-                if ($Command -like '*usermod*')  { New-SshResult 0 }
+                if ($Command -like 'id -Gn*') {
+                    New-SshResult 0 @('u-deploy docker')
+                }
+                if ($Command -like '*usermod*') {
+                    New-SshResult 0
+                }
             }
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @())
@@ -206,11 +324,19 @@ Describe 'Invoke-UserReconciliation' {
             # The comparison sorts both sides before comparing, so the on-disk
             # order returned by id -Gn must not be treated as drift.
             Mock Invoke-SSHCommand {
-                if ($Command -like "id '*'")      { New-SshResult 0 }
-                if ($Command -like 'getent*')   { New-SshResult 0 @('/bin/bash') }
+                if ($Command -like "id '*'") {
+                    New-SshResult 0
+                }
+                if ($Command -like 'getent*') {
+                    New-SshResult 0 @('/bin/bash')
+                }
                 # Host has groups in reverse order relative to the desired list.
-                if ($Command -like 'id -Gn*')   { New-SshResult 0 @('u-deploy runners docker') }
-                if ($Command -like '*usermod*')  { New-SshResult 0 }
+                if ($Command -like 'id -Gn*') {
+                    New-SshResult 0 @('u-deploy runners docker')
+                }
+                if ($Command -like '*usermod*') {
+                    New-SshResult 0
+                }
             }
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker', 'runners'))
@@ -231,10 +357,18 @@ Describe 'Invoke-UserReconciliation' {
             # desired shell, triggering a spurious usermod. Add an ExitStatus
             # check before the shell comparison if this becomes a problem.
             Mock Invoke-SSHCommand {
-                if ($Command -like "id '*'")      { New-SshResult 0 }
-                if ($Command -like 'getent*')   { New-SshResult 1 }  # fails - empty output
-                if ($Command -like 'id -Gn*')   { New-SshResult 0 @('u-deploy') }
-                if ($Command -like '*usermod*')  { New-SshResult 0 }
+                if ($Command -like "id '*'") {
+                    New-SshResult 0
+                }
+                if ($Command -like 'getent*') {
+                    New-SshResult 1  # fails - empty output
+                }
+                if ($Command -like 'id -Gn*') {
+                    New-SshResult 0 @('u-deploy')
+                }
+                if ($Command -like '*usermod*') {
+                    New-SshResult 0
+                }
             }
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash')
@@ -250,10 +384,18 @@ Describe 'Invoke-UserReconciliation' {
             # usermod. Add an ExitStatus check before the groups comparison if
             # this becomes a problem.
             Mock Invoke-SSHCommand {
-                if ($Command -like "id '*'")      { New-SshResult 0 }
-                if ($Command -like 'getent*')   { New-SshResult 0 @('/bin/bash') }
-                if ($Command -like 'id -Gn*')   { New-SshResult 1 }  # fails - empty output
-                if ($Command -like '*usermod*')  { New-SshResult 0 }
+                if ($Command -like "id '*'") {
+                    New-SshResult 0
+                }
+                if ($Command -like 'getent*') {
+                    New-SshResult 0 @('/bin/bash')
+                }
+                if ($Command -like 'id -Gn*') {
+                    New-SshResult 1  # fails - empty output
+                }
+                if ($Command -like '*usermod*') {
+                    New-SshResult 0
+                }
             }
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker'))
@@ -269,10 +411,18 @@ Describe 'Invoke-UserReconciliation' {
 
         It 'issues a single usermod for both shell and group changes' {
             Mock Invoke-SSHCommand {
-                if ($Command -like "id '*'")      { New-SshResult 0 }
-                if ($Command -like 'getent*')   { New-SshResult 0 @('/bin/sh') }
-                if ($Command -like 'id -Gn*')   { New-SshResult 0 @('u-deploy') }
-                if ($Command -like '*usermod*')  { New-SshResult 0 }
+                if ($Command -like "id '*'") {
+                    New-SshResult 0
+                }
+                if ($Command -like 'getent*') {
+                    New-SshResult 0 @('/bin/sh')
+                }
+                if ($Command -like 'id -Gn*') {
+                    New-SshResult 0 @('u-deploy')
+                }
+                if ($Command -like '*usermod*') {
+                    New-SshResult 0
+                }
             }
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker'))

@@ -111,10 +111,10 @@ provisioner config by `vmName`.
         "username": "u-actions-runner",
         "shell":    "/usr/sbin/nologin",
         "homeDir":  "/home/u-actions-runner",
-        // No supplementary groups needed. useradd automatically creates a
-        // primary group named u-actions-runner, which owns the home directory.
-        // u-runner-deploy joins that primary group as a supplementary member
-        // to gain write access - u-actions-runner itself does not need to.
+        // No supplementary groups needed. The primary group u-actions-runner
+        // is declared in the groups section above; useradd adopts it via -g
+        // rather than creating a new one. u-runner-deploy joins that primary
+        // group as a supplementary member for write access.
         "groups":       [],
         // Lines written verbatim to /etc/sudoers.d/{username}.
         // Empty list = file absent (removed if previously present).
