@@ -102,7 +102,7 @@ provisioner config by `vmName`.
     "groups": [
       {
         "groupName":   "u-actions-runner",
-        // Optional. Informational; written to /etc/gshadow via gpasswd.
+        // Optional. Informational; written to /etc/group via groupmod.
         "description": "Primary group for the actions runner service account."
       }
     ],
@@ -111,10 +111,10 @@ provisioner config by `vmName`.
         "username": "u-actions-runner",
         "shell":    "/usr/sbin/nologin",
         "homeDir":  "/home/u-actions-runner",
-        // No supplementary groups needed. useradd automatically creates a
-        // primary group named u-actions-runner, which owns the home directory.
-        // u-runner-deploy joins that primary group as a supplementary member
-        // to gain write access - u-actions-runner itself does not need to.
+        // No supplementary groups needed. The primary group u-actions-runner
+        // is declared in the groups section above; useradd adopts it via -g
+        // rather than creating a new one. u-runner-deploy joins that primary
+        // group as a supplementary member for write access.
         "groups":       [],
         // Lines written verbatim to /etc/sudoers.d/{username}.
         // Empty list = file absent (removed if previously present).
@@ -161,7 +161,7 @@ provisioner config by `vmName`.
 | `groups` | Array of group declarations to ensure exist before users are processed |
 | `groups[].groupName` | Group name (required within each group entry) |
 | `groups[].gid` | Pin the GID - useful for NFS / Docker bind mounts; mismatch is an error |
-| `groups[].description` | Informational text written to `/etc/gshadow` via `gpasswd` |
+| `groups[].description` | Informational text written to `/etc/group` via `groupmod` |
 
 ---
 

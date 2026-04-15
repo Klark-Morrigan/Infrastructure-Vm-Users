@@ -9,7 +9,7 @@
 #   Ensures a single OS user exists on the remote host with the correct shell
 #   and supplementary group membership.
 #
-#   Create path: useradd -m -d -s [-G] username
+#   Create path: useradd -m -d -s [-g] [-G] username
 #   Update path: usermod -s -G username (replaces full supplementary list)
 #
 #   homeDir is intentionally not reconciled on existing users: moving a home
@@ -57,11 +57,28 @@ function Invoke-UserReconciliation {
         #   -m : create home directory if it does not exist
         #   -d : home directory path
         #   -s : login shell
+        #   -g : primary group - only passed when a group with the same name
+        #        as the user already exists (e.g. declared in the groups
+        #        config). Without -g, useradd auto-creates the primary group;
+        #        if that group already exists the command fails.
         #   -G : supplementary groups (omitted when list is empty to avoid
         #        an error on an empty group argument)
         # -------------------------------------------------------------------
 
+        # On Linux the convention is to name the primary group after the user.
+        $primaryGroupName = $username
+
+        $primaryGroupResult = Invoke-SSHCommand `
+            -SessionId $SessionId `
+            -Command   "getent group '$primaryGroupName'" `
+            -ErrorAction Stop
+
         $cmd = "sudo useradd -m -d '$homeDir' -s '$shell'"
+        if ($primaryGroupResult.ExitStatus -eq 0) {
+            # Primary group pre-exists - adopt it explicitly.
+            $cmd += " -g '$primaryGroupName'"
+        } # else: primary group absent - useradd creates it automatically.
+        
         if ($groups.Count -gt 0) {
             $cmd += " -G '$($groups -join ',')'"
         }
