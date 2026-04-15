@@ -70,7 +70,7 @@ Describe 'Invoke-GroupReconciliation' {
                 Should -Throw -ExpectedMessage '*groupadd failed*'
         }
 
-        It 'sets the description via gpasswd --comment when description is declared' {
+        It 'sets the description via groupmod --comment when description is declared' {
             $group = [PSCustomObject]@{ groupName = 'docker'; description = 'Container runtime' }
             Mock Invoke-SSHCommand {
                 if ($Command -like 'getent*')   { New-SshResult 1 }
@@ -79,11 +79,11 @@ Describe 'Invoke-GroupReconciliation' {
             Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
                 -DeclaredGroups @($group) -Users @()
             Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
-                $Command -like "*gpasswd --comment*Container runtime*docker*"
+                $Command -like "*groupmod --comment*Container runtime*docker*"
             }
         }
 
-        It 'throws when gpasswd --comment fails' {
+        It 'throws when groupmod --comment fails' {
             $group = [PSCustomObject]@{ groupName = 'docker'; description = 'Container runtime' }
             Mock Invoke-SSHCommand {
                 if ($Command -like 'getent*')         { New-SshResult 1 }
@@ -92,7 +92,7 @@ Describe 'Invoke-GroupReconciliation' {
             }
             { Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
                 -DeclaredGroups @($group) -Users @() } |
-                Should -Throw -ExpectedMessage '*gpasswd --comment failed*'
+                Should -Throw -ExpectedMessage '*groupmod --comment failed*'
         }
     }
 
@@ -124,17 +124,17 @@ Describe 'Invoke-GroupReconciliation' {
         }
 
         It 'does not set description when the group already exists' {
-            # KNOWN BEHAVIOUR: gpasswd --comment is only called during group
+            # KNOWN BEHAVIOUR: groupmod --comment is only called during group
             # creation. If the group is already present on the host, its
-            # description field in /etc/gshadow is not reconciled. A pre-existing
+            # description field in /etc/group is not reconciled. A pre-existing
             # group that has a different (or no) description will not be updated.
-            # To change the description of an existing group, run gpasswd manually.
+            # To change the description of an existing group, run groupmod manually.
             $group = [PSCustomObject]@{ groupName = 'docker'; description = 'Container runtime' }
             Mock Invoke-SSHCommand { New-SshResult 0 @('docker:x:999:') }
             Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
                 -DeclaredGroups @($group) -Users @()
             Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
-                $Command -like '*gpasswd*'
+                $Command -like '*groupmod*'
             }
         }
     }

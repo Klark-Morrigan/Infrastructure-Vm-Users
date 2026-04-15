@@ -81,16 +81,16 @@ function Invoke-GroupReconciliation {
                 throw "[$VmName] groupadd failed for '$groupName': $($r.Error)"
             }
 
-            # Write description to /etc/gshadow (informational only;
+            # Write description to /etc/group (informational only;
             # not read back for reconciliation - always overwritten).
             if ($null -ne $description -and "$description" -ne '') {
                 $r = Invoke-SSHCommand `
                     -SessionId $SessionId `
-                    -Command   "sudo gpasswd --comment '$description' '$groupName'" `
+                    -Command   "sudo groupmod --comment '$description' '$groupName'" `
                     -ErrorAction Stop
 
                 if ($r.ExitStatus -ne 0) {
-                    throw "[$VmName] gpasswd --comment failed for '$groupName': $($r.Error)"
+                    throw "[$VmName] groupmod --comment failed for '$groupName': $($r.Error)"
                 }
             }
 
