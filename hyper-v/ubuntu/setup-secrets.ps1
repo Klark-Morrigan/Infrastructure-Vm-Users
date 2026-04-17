@@ -51,6 +51,10 @@ $ErrorActionPreference = 'Stop'
 # for all subsequent module installs. This inline block is the only install
 # logic that cannot be abstracted - you cannot call a function from a module
 # that hasn't been installed yet.
+# NuGet must be ensured here explicitly because Invoke-ModuleInstall is not
+# yet available to do it, and Install-Module requires NuGet to reach PSGallery.
+Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 `
+    -Scope CurrentUser -Force -ForceBootstrap | Out-Null
 $_common = Get-Module -ListAvailable -Name Infrastructure.Common |
     Sort-Object Version -Descending | Select-Object -First 1
 if (-not $_common -or $_common.Version -lt [Version]'1.0.3') {
@@ -64,9 +68,9 @@ Import-Module Infrastructure.Common -Force -ErrorAction Stop
 . "$PSScriptRoot\common.ps1"
 
 # The minimum version is pinned here - bump it when a newer feature is required.
-Invoke-ModuleInstall -ModuleName 'Infrastructure.Secrets' -MinimumVersion '2.0.1'
+Invoke-ModuleInstall -ModuleName 'Infrastructure.Secrets' -MinimumVersion '2.1.0'
 
-Initialize-InfrastructureVault `
+Initialize-MicrosoftPowerShellSecretStoreVault `
     -VaultName  'VmUsers' `
     -SecretName 'VmUsersConfig' `
     @PSBoundParameters `
