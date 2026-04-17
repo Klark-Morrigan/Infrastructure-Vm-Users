@@ -84,6 +84,11 @@ VMs by `vmName`:
         // Joins u-actions-runner as a supplementary group to write into
         // /home/u-actions-runner/runners/ (set g+rwx by GitHubRunners repo).
         "groups":       ["u-actions-runner"],
+        // Optional. When present, always written via chpasswd - no comparison
+        // is possible with a hashed password on the VM. This vault entry is
+        // the canonical source of the password for consuming repos such as
+        // Infrastructure-GitHubRunners. Must never appear in console output.
+        "password":     "...",
         "sudoersRules": [
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /home/u-actions-runner/runners/*/config.sh",
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /home/u-actions-runner/runners/*/svc.sh",
@@ -197,12 +202,35 @@ sequenceDiagram
 **What:** For each matched, reachable VM, for each desired user:
 1. Check if the user exists (`id {username}`).
 2. If not: `useradd` with the specified shell, home directory, and groups.
-3. If yes: check shell and groups match desired state; update if not
-   (`usermod`).
-4. Emit a per-user result line: `created`, `updated`, or `ok`.
+3. If yes: read current shell (`getent passwd`), supplementary groups
+   (`id -Gn`), and home directory (`getent passwd`), then:
+   - **shell** drifted: `usermod -s`
+   - **groups** drifted: `usermod -G` (replaces full supplementary list)
+   - **homeDir** drifted: emit a `Write-Warning` — moving a home directory
+     risks data loss and must be done manually. Do not silently skip;
+     silent drift means the operator never knows the config and the VM
+     disagree.
+   - **other fields** (UID, primary group name, GECOS): not managed by
+     this script; if they differ the script takes no action and emits no
+     warning. These fields are outside the config schema and their drift
+     is the operator's responsibility.
+4. If `password` is present in the user config: always set it via
+   `chpasswd` regardless of whether the user was just created or already
+   existed. Comparison is impossible — a Unix password hash cannot be
+   compared to a plaintext value — so always overwriting is the only safe
+   approach. The password must not appear in the SSH command string; pipe
+   it via stdin: `echo '{username}:{password}' | sudo chpasswd`.
+5. Emit a per-user result line: `created`, `updated`, or `ok`. Password
+   setting is never reflected in the result line — its value must not
+   appear in output.
 
 **Why:** Reconciling rather than just creating means re-running is always
 safe and drifted config (e.g. shell changed manually) is corrected.
+Explicit warnings on homeDir drift prevent silent disagreement between
+config and VM state. Always overwriting the password on each run ensures
+the vault is the authoritative source — a password changed manually on
+the VM is corrected back. Piping via stdin avoids the password appearing
+in the process argument list, which is visible in `ps aux` output.
 
 ```mermaid
 sequenceDiagram
@@ -212,18 +240,25 @@ sequenceDiagram
     P->>VM: id {username}
     alt user missing
         VM-->>P: not found
-        P->>VM: useradd -s -d -G
+        P->>VM: useradd -m -s -d -G
         VM-->>P: created
     else user exists
         VM-->>P: found
         P->>VM: getent passwd / id -Gn
-        VM-->>P: current shell + groups
-        alt shell or groups drifted
-            P->>VM: usermod -s -G
-            VM-->>P: updated
-        else already correct
-            VM-->>P: ok - skip
+        VM-->>P: shell + homeDir + groups
+        opt shell drifted
+            P->>VM: usermod -s
         end
+        opt groups drifted
+            P->>VM: usermod -G
+        end
+        opt homeDir drifted
+            P->>P: Write-Warning - manual action required
+        end
+    end
+    opt password in config
+        P->>VM: echo user:pass | sudo chpasswd (stdin)
+        VM-->>P: ok
     end
 ```
 

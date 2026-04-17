@@ -109,6 +109,10 @@ provisioner config by `vmName`.
     "users": [
       {
         "username": "u-actions-runner",
+        // nologin prevents direct SSH login - this account is service-only.
+        // Even if credentials were known, the shell rejects interactive
+        // sessions. Consuming repos (e.g. Infrastructure-GitHubRunners)
+        // act as this user only via sudoers delegation from u-runner-deploy.
         "shell":    "/usr/sbin/nologin",
         "homeDir":  "/home/u-actions-runner",
         // No supplementary groups needed. The primary group u-actions-runner
@@ -122,6 +126,9 @@ provisioner config by `vmName`.
       },
       {
         "username": "u-runner-deploy",
+        // Interactive shell - this account is the SSH entry point used by
+        // consuming repos at deploy time. Admin credentials are never
+        // required or stored outside the VmProvisioner vault.
         "shell":    "/bin/bash",
         "homeDir":  "/home/u-runner-deploy",
         // Joins u-actions-runner as a supplementary group so it can write
@@ -131,6 +138,18 @@ provisioner config by `vmName`.
         // Broad sudo rules for mkdir/tar are avoided: wildcard paths make
         // them exploitable via path manipulation.
         "groups":   ["u-actions-runner"],
+        // Optional. When present, written via chpasswd on every run.
+        // Comparison against an existing hash is impossible, so overwriting
+        // is the only safe approach. This vault entry is the canonical source
+        // of the password - consuming repos read from here rather than
+        // storing their own copy. Must never appear in console output or
+        // SSH command arguments.
+        "password": "...",
+        // Scoped to exactly the operations Infrastructure-GitHubRunners
+        // requires. SSH password auth is the only gate - once authenticated,
+        // there is no further challenge before sudo. These four rules bound
+        // the blast radius: even if u-runner-deploy credentials are
+        // compromised, the attacker cannot escalate beyond them.
         "sudoersRules": [
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /home/u-actions-runner/runners/*/config.sh",
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /home/u-actions-runner/runners/*/svc.sh",
@@ -162,6 +181,7 @@ provisioner config by `vmName`.
 | `groups[].groupName` | Group name (required within each group entry) |
 | `groups[].gid` | Pin the GID - useful for NFS / Docker bind mounts; mismatch is an error |
 | `groups[].description` | Informational text written to `/etc/group` via `groupmod` |
+| `users[].password` | OS password - always written via `chpasswd`; canonical source for consuming repos |
 
 ---
 
