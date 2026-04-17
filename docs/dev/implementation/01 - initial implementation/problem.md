@@ -55,5 +55,8 @@ repos must not require admin credentials at runtime.
   desired state are left untouched.
 - This repo has no knowledge of what the users will be used for - all
   configuration is caller-supplied via the vault JSON.
-- Passwords for created users are set by the operator outside this script
-  and stored in the consuming repo's vault.
+- Passwords for users are optional in the config. When present they are
+  always written via `chpasswd` — comparison against the existing hash is
+  not possible, so overwriting is the only safe approach. This vault entry
+  is the canonical source; consuming repos (e.g. Infrastructure-GitHubRunners)
+  read the password from here rather than storing their own copy.
