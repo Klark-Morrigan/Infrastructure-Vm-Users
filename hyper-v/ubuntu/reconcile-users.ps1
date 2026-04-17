@@ -33,10 +33,11 @@ function Invoke-UserReconciliation {
     $shell    = $User.shell
     $homeDir  = $User.homeDir
 
-    # groups is optional in the config schema - guard with Get-Member so that
-    # user objects without the property do not throw under StrictMode.
-    # NOTE: do not use the if/else expression form here - see reconcile-sudoers.ps1
-    # for the reason (empty @() collapses to $null in a pipeline expression).
+    # groups and password are optional in the config schema - guard with
+    # Get-Member so objects without these properties do not throw under
+    # StrictMode. NOTE: do not use the if/else expression form here - see
+    # reconcile-sudoers.ps1 for the reason (empty @() collapses to $null
+    # in a pipeline expression).
     $userMembers = (Get-Member -InputObject $User -MemberType NoteProperty).Name
     # @() normalises PS 5.1 single-element JSON unwrapping to an array.
     if ($userMembers -contains 'groups') {
@@ -44,6 +45,7 @@ function Invoke-UserReconciliation {
     } else {
         $groups = @()
     }
+    $hasPassword = $userMembers -contains 'password'
 
     # 'id' exits 0 if the user exists, non-zero otherwise.
     $idResult = Invoke-SSHCommand `
@@ -101,13 +103,19 @@ function Invoke-UserReconciliation {
         # -------------------------------------------------------------------
 
         # getent passwd is preferred over parsing /etc/passwd because it also
-        # handles LDAP/NIS accounts.
-        $shellResult = Invoke-SSHCommand `
+        # handles LDAP/NIS accounts. Read the full entry in one SSH round
+        # trip so both shell (field 7) and homeDir (field 6) can be checked.
+        $passwdResult = Invoke-SSHCommand `
             -SessionId $SessionId `
-            -Command   "getent passwd '$username' | cut -d: -f7" `
+            -Command   "getent passwd '$username'" `
             -ErrorAction Stop
 
-        $currentShell = ($shellResult.Output -join '').Trim()
+        # If the command fails or returns unexpected output, default to empty
+        # string - the comparisons below will treat this as drift and act
+        # accordingly (same as the existing behaviour for a failed getent).
+        $passwdFields   = ($passwdResult.Output -join '').Trim() -split ':'
+        $currentShell   = if ($passwdFields.Count -ge 7) { $passwdFields[6] } else { '' }
+        $currentHomeDir = if ($passwdFields.Count -ge 7) { $passwdFields[5] } else { '' }
 
         # id -Gn returns all groups including the primary group (same name as
         # username on Ubuntu). Strip it to isolate supplementary groups, then
@@ -124,10 +132,20 @@ function Invoke-UserReconciliation {
         )
         $desiredGroups = @($groups | Sort-Object)
 
-        $shellDrifted = $currentShell -ne $shell
+        $shellDrifted  = $currentShell -ne $shell
         # Join sorted arrays as comma strings for a simple equality check
         # that handles empty arrays correctly in PS 5.1.
         $groupsDrifted = ($currentGroups -join ',') -ne ($desiredGroups -join ',')
+
+        # homeDir is intentionally not reconciled - moving a home directory
+        # risks data loss (owned files stay at the old path). Warn so the
+        # operator knows the VM and config disagree rather than silently
+        # leaving them out of sync.
+        if ($currentHomeDir -ne $homeDir) {
+            Write-Warning ("[$VmName] user '$username': homeDir has drifted " +
+                "(current: '$currentHomeDir', desired: '$homeDir'). " +
+                "Moving a home directory risks data loss - update manually.")
+        }
 
         if ($shellDrifted -or $groupsDrifted) {
             # usermod -G replaces the full supplementary group list.
@@ -157,6 +175,31 @@ function Invoke-UserReconciliation {
         }
         else {
             Write-Host "[$VmName] user '$username': ok" -ForegroundColor Green
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Password - always set when present in config, regardless of whether
+    # the user was just created or already existed.
+    #
+    # Comparison against the stored hash is not possible (Unix stores a
+    # one-way hash, not the plaintext), so overwriting on every run is the
+    # only safe approach. This vault entry is the authoritative source;
+    # consuming repos read from here.
+    #
+    # The password is piped via stdin so it does not appear in the SSH
+    # command's argument list (visible in ps aux on the remote host).
+    # It must not appear in console output or error messages - only
+    # vmName and username are safe to log.
+    # -----------------------------------------------------------------------
+    if ($hasPassword) {
+        $r = Invoke-SSHCommand `
+            -SessionId $SessionId `
+            -Command   "echo '${username}:$($User.password)' | sudo chpasswd" `
+            -ErrorAction Stop
+
+        if ($r.ExitStatus -ne 0) {
+            throw "[$VmName] chpasswd failed for '$username': $($r.Error)"
         }
     }
 }

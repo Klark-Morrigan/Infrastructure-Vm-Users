@@ -7,14 +7,28 @@ BeforeAll {
         [PSCustomObject]@{ ExitStatus = $ExitStatus; Output = $Output; Error = $Err }
     }
 
-    function New-User([string] $Username, [string] $Shell = '/bin/bash',
-                      [string] $HomeDir = '/home/u-deploy', [string[]] $Groups = @()) {
-        [PSCustomObject]@{
+    function New-User {
+        param(
+            [string]   $Username,
+            [string]   $Shell    = '/bin/bash',
+            [string]   $HomeDir  = '/home/u-deploy',
+            [string[]] $Groups   = @(),
+            # Password is optional - omit the parameter entirely to produce a
+            # user object without a 'password' property, mirroring the JSON
+            # schema where the field is absent rather than null.
+            [string]   $Password
+        )
+        $obj = [PSCustomObject]@{
             username = $Username
             shell    = $Shell
             homeDir  = $HomeDir
             groups   = $Groups
         }
+        if ($PSBoundParameters.ContainsKey('Password')) {
+            Add-Member -InputObject $obj -MemberType NoteProperty `
+                -Name 'password' -Value $Password
+        }
+        $obj
     }
 }
 
@@ -53,7 +67,7 @@ Describe 'Invoke-UserReconciliation' {
     Context 'user does not exist' {
     # ------------------------------------------------------------------
 
-        It 'calls useradd when the user is absent' {
+        It 'calls useradd with -m, -d, -s and the username when the user is absent' {
             Mock Invoke-SSHCommand {
                 if ($Command -like 'id*') {
                     New-SshResult 1
@@ -66,9 +80,9 @@ Describe 'Invoke-UserReconciliation' {
                 }
             }
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
-                -User (New-User 'u-deploy')
+                -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy')
             Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
-                $Command -like '*useradd*u-deploy*'
+                $Command -like "*useradd*-m*-d '/home/u-deploy'*-s '/bin/bash'*u-deploy*"
             }
         }
 
@@ -87,7 +101,7 @@ Describe 'Invoke-UserReconciliation' {
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker', 'runners'))
             Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
-                $Command -like "*-G*docker*" -or $Command -like "*-G*runners*"
+                $Command -like "*-G*docker*" -and $Command -like "*-G*runners*"
             }
         }
 
@@ -172,47 +186,52 @@ Describe 'Invoke-UserReconciliation' {
     Context 'user exists - no drift' {
     # ------------------------------------------------------------------
 
-        It 'does not issue any homeDir-related command when homeDir has changed' {
-            # KNOWN BEHAVIOUR: homeDir is not reconciled on existing users.
-            # Moving a home directory risks data loss (owned files stay behind)
-            # and requires careful coordination, so it is left as a manual
-            # operation. A changed homeDir in config must never trigger usermod.
+        It 'emits a Write-Warning but does not run usermod when homeDir has drifted' {
+            # homeDir is intentionally not reconciled - moving it risks data
+            # loss. A Write-Warning must be emitted so the operator knows the
+            # VM and config disagree; usermod must never be called.
             Mock Invoke-SSHCommand {
                 if ($Command -like "id '*'") {
                     New-SshResult 0
                 }
-                if ($Command -like 'getent*') {
-                    New-SshResult 0 @('/bin/bash')
+                if ($Command -like 'getent passwd*') {
+                    # VM has the conventional homeDir; config requests /srv/custom-home.
+                    New-SshResult 0 @('u-deploy:x:1001:1001::/home/u-deploy:/bin/bash')
                 }
                 if ($Command -like 'id -Gn*') {
                     New-SshResult 0 @('u-deploy')
                 }
             }
-            # Desired homeDir differs from the conventional path - must be ignored.
+            Mock Write-Warning {}
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/srv/custom-home' @())
+            Should -Invoke Write-Warning -Times 1 -ParameterFilter {
+                $Message -like '*homeDir has drifted*'
+            }
             Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
-                $Command -like '*usermod*' -or $Command -like '*home*'
+                $Command -like '*usermod*'
             }
         }
 
-        It 'does not call usermod when shell and groups are correct' {
+        It 'does not call usermod or Write-Warning when shell, groups and homeDir are correct' {
             Mock Invoke-SSHCommand {
                 if ($Command -like 'id*') {
                     New-SshResult 0
                 }
                 if ($Command -like 'getent*') {
-                    New-SshResult 0 @('/bin/bash')
+                    New-SshResult 0 @('u-deploy:x:1001:1001::/home/u-deploy:/bin/bash')
                 }
                 if ($Command -like 'id -Gn*') {
                     New-SshResult 0 @('u-deploy docker')
                 }
             }
+            Mock Write-Warning {}
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker'))
             Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
                 $Command -like '*usermod*'
             }
+            Should -Invoke Write-Warning -Times 0
         }
     }
 
@@ -226,7 +245,7 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
                 if ($Command -like 'getent*') {
-                    New-SshResult 0 @('/bin/sh')
+                    New-SshResult 0 @('u-deploy:x:1001:1001::/home/u-deploy:/bin/sh')
                 }
                 if ($Command -like 'id -Gn*') {
                     New-SshResult 0 @('u-deploy')
@@ -248,7 +267,7 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
                 if ($Command -like 'getent*') {
-                    New-SshResult 0 @('/bin/sh')
+                    New-SshResult 0 @('u-deploy:x:1001:1001::/home/u-deploy:/bin/sh')
                 }
                 if ($Command -like 'id -Gn*') {
                     New-SshResult 0 @('u-deploy')
@@ -267,13 +286,13 @@ Describe 'Invoke-UserReconciliation' {
     Context 'user exists - group drift' {
     # ------------------------------------------------------------------
 
-        It 'calls usermod when supplementary groups have changed' {
+        It 'calls usermod with the new group name when supplementary groups have changed' {
             Mock Invoke-SSHCommand {
                 if ($Command -like "id '*'") {
                     New-SshResult 0
                 }
                 if ($Command -like 'getent*') {
-                    New-SshResult 0 @('/bin/bash')
+                    New-SshResult 0 @('u-deploy:x:1001:1001::/home/u-deploy:/bin/bash')
                 }
                 # Current groups: only primary. Desired: docker added.
                 if ($Command -like 'id -Gn*') {
@@ -286,7 +305,7 @@ Describe 'Invoke-UserReconciliation' {
             Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker'))
             Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
-                $Command -like "*usermod*"
+                $Command -like "*usermod*-G*docker*"
             }
         }
 
@@ -298,7 +317,7 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
                 if ($Command -like 'getent*') {
-                    New-SshResult 0 @('/bin/bash')
+                    New-SshResult 0 @('u-deploy:x:1001:1001::/home/u-deploy:/bin/bash')
                 }
                 # Current: user is in docker. Desired: no supplementary groups.
                 if ($Command -like 'id -Gn*') {
@@ -328,7 +347,7 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
                 if ($Command -like 'getent*') {
-                    New-SshResult 0 @('/bin/bash')
+                    New-SshResult 0 @('u-deploy:x:1001:1001::/home/u-deploy:/bin/bash')
                 }
                 # Host has groups in reverse order relative to the desired list.
                 if ($Command -like 'id -Gn*') {
@@ -353,9 +372,12 @@ Describe 'Invoke-UserReconciliation' {
         It 'calls usermod when getent passwd fails (pins current behaviour: treat as empty shell)' {
             # KNOWN BEHAVIOUR: getent passwd exit status is not checked. A
             # failing getent (e.g. LDAP timeout, permission error) produces
-            # an empty $currentShell, which always differs from any non-empty
-            # desired shell, triggering a spurious usermod. Add an ExitStatus
-            # check before the shell comparison if this becomes a problem.
+            # empty strings for both $currentShell and $currentHomeDir.
+            # The empty shell always differs from any non-empty desired shell,
+            # triggering a spurious usermod. The empty homeDir always differs
+            # from any non-empty desired homeDir, triggering a spurious
+            # Write-Warning. Add ExitStatus checks before both comparisons
+            # if this becomes a problem.
             Mock Invoke-SSHCommand {
                 if ($Command -like "id '*'") {
                     New-SshResult 0
@@ -388,7 +410,7 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
                 if ($Command -like 'getent*') {
-                    New-SshResult 0 @('/bin/bash')
+                    New-SshResult 0 @('u-deploy:x:1001:1001::/home/u-deploy:/bin/bash')
                 }
                 if ($Command -like 'id -Gn*') {
                     New-SshResult 1  # fails - empty output
@@ -415,7 +437,7 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
                 if ($Command -like 'getent*') {
-                    New-SshResult 0 @('/bin/sh')
+                    New-SshResult 0 @('u-deploy:x:1001:1001::/home/u-deploy:/bin/sh')
                 }
                 if ($Command -like 'id -Gn*') {
                     New-SshResult 0 @('u-deploy')
@@ -430,6 +452,74 @@ Describe 'Invoke-UserReconciliation' {
             Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like "*usermod*-s '/bin/bash'*" -and $Command -like "*-G*docker*"
             }
+        }
+    }
+
+    # ------------------------------------------------------------------
+    Context 'password' {
+    # ------------------------------------------------------------------
+
+        It 'calls chpasswd after creating a new user when password is in config' {
+            Mock Invoke-SSHCommand {
+                if ($Command -like 'id*') { New-SshResult 1 }
+                elseif ($Command -like 'getent group*') { New-SshResult 1 }
+                else { New-SshResult 0 }
+            }
+            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+                -User (New-User 'u-deploy' -Password 's3cret')
+            # Verify the stdin pipe pattern: password must not appear as a
+            # chpasswd argument (visible in ps aux on the remote host).
+            Should -Invoke Invoke-SSHCommand -Times 1 -ParameterFilter {
+                $Command -like "echo*u-deploy*s3cret*|*chpasswd*"
+            }
+        }
+
+        It 'calls chpasswd after updating an existing user when password is in config' {
+            Mock Invoke-SSHCommand {
+                if ($Command -like "id '*'") { New-SshResult 0 }
+                elseif ($Command -like 'getent passwd*') {
+                    New-SshResult 0 @('u-deploy:x:1001:1001::/home/u-deploy:/bin/bash')
+                }
+                elseif ($Command -like 'id -Gn*') { New-SshResult 0 @('u-deploy') }
+                else { New-SshResult 0 }
+            }
+            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+                -User (New-User 'u-deploy' -Password 's3cret')
+            # Same stdin pipe check as the create path - chpasswd must not
+            # receive the password as a command-line argument.
+            Should -Invoke Invoke-SSHCommand -Times 1 -ParameterFilter {
+                $Command -like "echo*u-deploy*s3cret*|*chpasswd*"
+            }
+        }
+
+        It 'does not call chpasswd when password is absent from config' {
+            Mock Invoke-SSHCommand {
+                if ($Command -like "id '*'") { New-SshResult 0 }
+                elseif ($Command -like 'getent passwd*') {
+                    New-SshResult 0 @('u-deploy:x:1001:1001::/home/u-deploy:/bin/bash')
+                }
+                elseif ($Command -like 'id -Gn*') { New-SshResult 0 @('u-deploy') }
+                else { New-SshResult 0 }
+            }
+            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+                -User (New-User 'u-deploy')
+            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+                $Command -like '*chpasswd*'
+            }
+        }
+
+        It 'throws when chpasswd fails' {
+            Mock Invoke-SSHCommand {
+                if ($Command -like 'id*') { New-SshResult 1 }
+                elseif ($Command -like 'getent group*') { New-SshResult 1 }
+                elseif ($Command -like '*chpasswd*') {
+                    New-SshResult 1 @() 'Authentication token manipulation error'
+                }
+                else { New-SshResult 0 }
+            }
+            { Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+                -User (New-User 'u-deploy' -Password 's3cret') } |
+                Should -Throw -ExpectedMessage '*chpasswd failed*'
         }
     }
 }
