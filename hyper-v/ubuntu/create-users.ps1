@@ -31,7 +31,7 @@ $ErrorActionPreference = 'Stop'
 # latter is auto-installed below), so we do not silently install them here.
 $_common = Get-Module -ListAvailable -Name Infrastructure.Common |
     Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'1.2.0') {
+if (-not $_common -or $_common.Version -lt [Version]'1.2.1') {
     Install-Module Infrastructure.Common -Scope CurrentUser -Force
 }
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
@@ -52,7 +52,7 @@ Import-Module Microsoft.PowerShell.SecretManagement    -ErrorAction Stop
 # because ConnectionInfoGenerator in Posh-SSH 3.x has a bug that drops
 # algorithm entries from the SSH.NET ConnectionInfo, causing "Key exchange
 # negotiation failed" against OpenSSH 9.x (Ubuntu 24.04). SSH.NET is used
-# directly instead via Invoke-SshCommand (Infrastructure.Common) and the
+# directly instead via Invoke-SshClientCommand (Infrastructure.Common) and the
 # connection block in the reconciliation loop below.
 Invoke-ModuleInstall -ModuleName 'Posh-SSH'
 

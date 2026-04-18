@@ -52,7 +52,7 @@ function Invoke-SudoersReconciliation {
     $tmpPath      = "/tmp/.sudoers_tmp_$username"
 
     # Read current rules; treat an absent file as empty.
-    $existsResult = Invoke-SshCommand `
+    $existsResult = Invoke-SshClientCommand `
         -SshClient $SshClient `
         -Command   "sudo test -f '$sudoersPath' && echo exists || echo absent" `
         -ErrorAction Stop
@@ -61,7 +61,7 @@ function Invoke-SudoersReconciliation {
     $currentRules = @()
 
     if ($fileExists) {
-        $catResult = Invoke-SshCommand `
+        $catResult = Invoke-SshClientCommand `
             -SshClient $SshClient `
             -Command   "sudo cat '$sudoersPath'" `
             -ErrorAction Stop
@@ -81,7 +81,7 @@ function Invoke-SudoersReconciliation {
     }
     elseif ($desiredRules.Count -eq 0 -and $fileExists) {
         # Rules were removed from config - delete the file.
-        $r = Invoke-SshCommand `
+        $r = Invoke-SshClientCommand `
             -SshClient $SshClient `
             -Command   "sudo rm '$sudoersPath'" `
             -ErrorAction Stop
@@ -110,7 +110,7 @@ function Invoke-SudoersReconciliation {
                            [Text.Encoding]::UTF8.GetBytes($content))
 
             # Write content to a temp file via base64 decode.
-            $r = Invoke-SshCommand `
+            $r = Invoke-SshClientCommand `
                 -SshClient $SshClient `
                 -Command   "echo '$b64' | base64 -d | sudo tee '$tmpPath' > /dev/null" `
                 -ErrorAction Stop
@@ -121,38 +121,38 @@ function Invoke-SudoersReconciliation {
 
             # chmod before visudo: some versions warn on world-readable files
             # even during a -c -f check.
-            $r = Invoke-SshCommand `
+            $r = Invoke-SshClientCommand `
                 -SshClient $SshClient `
                 -Command   "sudo chmod 0440 '$tmpPath'" `
                 -ErrorAction Stop
 
             if ($r.ExitStatus -ne 0) {
-                Invoke-SshCommand -SshClient $SshClient `
+                Invoke-SshClientCommand -SshClient $SshClient `
                     -Command "sudo rm -f '$tmpPath'" | Out-Null
                 throw "[$VmName] chmod failed on temp sudoers for '$username': $($r.Error)"
             }
 
             # Validate syntax. If this fails, remove the temp file and abort -
             # the live sudoers file is untouched.
-            $r = Invoke-SshCommand `
+            $r = Invoke-SshClientCommand `
                 -SshClient $SshClient `
                 -Command   "sudo visudo -c -f '$tmpPath'" `
                 -ErrorAction Stop
 
             if ($r.ExitStatus -ne 0) {
-                Invoke-SshCommand -SshClient $SshClient `
+                Invoke-SshClientCommand -SshClient $SshClient `
                     -Command "sudo rm -f '$tmpPath'" | Out-Null
                 throw "[$VmName] visudo validation failed for '$username': $($r.Output -join ' ')"
             }
 
             # Validation passed - move the temp file into place.
-            $r = Invoke-SshCommand `
+            $r = Invoke-SshClientCommand `
                 -SshClient $SshClient `
                 -Command   "sudo mv '$tmpPath' '$sudoersPath'" `
                 -ErrorAction Stop
 
             if ($r.ExitStatus -ne 0) {
-                Invoke-SshCommand -SshClient $SshClient `
+                Invoke-SshClientCommand -SshClient $SshClient `
                     -Command "sudo rm -f '$tmpPath'" | Out-Null
                 throw "[$VmName] Failed to install sudoers for '$username': $($r.Error)"
             }

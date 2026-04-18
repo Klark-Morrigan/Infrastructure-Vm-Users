@@ -63,7 +63,7 @@ function Invoke-GroupReconciliation {
 
         $null = $declaredGroupNames.Add($groupName)
 
-        $getentResult = Invoke-SshCommand `
+        $getentResult = Invoke-SshClientCommand `
             -SshClient $SshClient `
             -Command   "getent group '$groupName'" `
             -ErrorAction Stop
@@ -76,7 +76,7 @@ function Invoke-GroupReconciliation {
             }
             $createCmd += " '$groupName'"
 
-            $r = Invoke-SshCommand `
+            $r = Invoke-SshClientCommand `
                 -SshClient $SshClient `
                 -Command   $createCmd `
                 -ErrorAction Stop
@@ -86,7 +86,7 @@ function Invoke-GroupReconciliation {
             }
 
             if ($null -ne $description -and "$description" -ne '') {
-                $r = Invoke-SshCommand `
+                $r = Invoke-SshClientCommand `
                     -SshClient $SshClient `
                     -Command   "sudo gpasswd -c '$description' '$groupName'" `
                     -ErrorAction Stop
@@ -135,13 +135,13 @@ function Invoke-GroupReconciliation {
             continue  # Already handled in pass 1.
         }
 
-        $getentResult = Invoke-SshCommand `
+        $getentResult = Invoke-SshClientCommand `
             -SshClient $SshClient `
             -Command   "getent group '$groupName'" `
             -ErrorAction Stop
 
         if ($getentResult.ExitStatus -ne 0) {
-            $r = Invoke-SshCommand `
+            $r = Invoke-SshClientCommand `
                 -SshClient $SshClient `
                 -Command   "sudo groupadd '$groupName'" `
                 -ErrorAction Stop

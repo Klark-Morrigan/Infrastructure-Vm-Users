@@ -119,7 +119,7 @@ BeforeAll {
     Start-Sleep -Seconds 1
 
     # -----------------------------------------------------------------------
-    # 5. Install Infrastructure.Common (provides Invoke-SshCommand), then
+    # 5. Install Infrastructure.Common (provides Invoke-SshClientCommand), then
     #    Posh-SSH (for its bundled SSH.NET DLL), and dot-source reconciliation
     #    functions. Posh-SSH cmdlets are NOT used - SSH.NET is used directly
     #    to avoid the Posh-SSH 3.x ConnectionInfoGenerator bug that drops
@@ -129,7 +129,7 @@ BeforeAll {
     Write-Step 5 'installing Infrastructure.Common from PSGallery'
 
     # Fresh container - bootstrap without Invoke-ModuleInstall.
-    Install-Module Infrastructure.Common -MinimumVersion '1.2.0' `
+    Install-Module Infrastructure.Common -MinimumVersion '1.2.1' `
         -Scope CurrentUser -Force -SkipPublisherCheck
     Import-Module Infrastructure.Common -Force -ErrorAction Stop
 
@@ -172,7 +172,7 @@ BeforeAll {
 
     function Invoke-SshQuery {
         param([string] $Command)
-        $r = Invoke-SshCommand -SshClient $Script:SshClient -Command $Command `
+        $r = Invoke-SshClientCommand -SshClient $Script:SshClient -Command $Command `
             -ErrorAction Stop
         return ($r.Output -join '').Trim()
     }
