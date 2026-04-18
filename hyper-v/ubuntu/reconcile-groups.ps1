@@ -53,6 +53,10 @@ function Invoke-GroupReconciliation {
 
         # gid and description are optional - guard with Get-Member to avoid
         # StrictMode errors when the property is absent on the PSCustomObject.
+        # description is stored in /etc/gshadow via 'gpasswd -c'; it is
+        # informational only and is not read back during reconciliation.
+        # /etc/group has no description field - gshadow is the only standard
+        # place Linux provides for a group comment.
         $groupMembers = (Get-Member -InputObject $group -MemberType NoteProperty).Name
         $gid          = if ($groupMembers -contains 'gid')         { $group.gid }         else { $null }
         $description  = if ($groupMembers -contains 'description') { $group.description } else { $null }
@@ -81,8 +85,6 @@ function Invoke-GroupReconciliation {
                 throw "[$VmName] groupadd failed for '$groupName': $($r.Error)"
             }
 
-            # Write description to /etc/group (informational only;
-            # not read back for reconciliation - always overwritten).
             if ($null -ne $description -and "$description" -ne '') {
                 $r = Invoke-SshCommand `
                     -SshClient $SshClient `

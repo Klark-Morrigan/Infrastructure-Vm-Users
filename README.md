@@ -103,7 +103,7 @@ provisioner config by `vmName`.
     "groups": [
       {
         "groupName":   "u-actions-runner",
-        // Optional. Informational; written to /etc/group via groupmod.
+        // Optional. Informational; stored in /etc/gshadow via gpasswd -c.
         "description": "Primary group for the actions runner service account."
       }
     ],
@@ -181,7 +181,7 @@ provisioner config by `vmName`.
 | `groups` | Array of group declarations to ensure exist before users are processed |
 | `groups[].groupName` | Group name (required within each group entry) |
 | `groups[].gid` | Pin the GID - useful for NFS / Docker bind mounts; mismatch is an error |
-| `groups[].description` | Informational text written to `/etc/group` via `groupmod` |
+| `groups[].description` | Informational comment stored in `/etc/gshadow` via `gpasswd -c`; not read back during reconciliation |
 | `users[].password` | OS password - always written via `chpasswd`; canonical source for consuming repos |
 
 ---
