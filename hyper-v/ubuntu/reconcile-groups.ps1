@@ -24,7 +24,7 @@ function Invoke-GroupReconciliation {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [int] $SessionId,
+        [object] $SshClient,
 
         [Parameter(Mandatory)]
         [string] $VmName,
@@ -53,14 +53,18 @@ function Invoke-GroupReconciliation {
 
         # gid and description are optional - guard with Get-Member to avoid
         # StrictMode errors when the property is absent on the PSCustomObject.
+        # description is stored in /etc/gshadow via 'gpasswd -c'; it is
+        # informational only and is not read back during reconciliation.
+        # /etc/group has no description field - gshadow is the only standard
+        # place Linux provides for a group comment.
         $groupMembers = (Get-Member -InputObject $group -MemberType NoteProperty).Name
         $gid          = if ($groupMembers -contains 'gid')         { $group.gid }         else { $null }
         $description  = if ($groupMembers -contains 'description') { $group.description } else { $null }
 
         $null = $declaredGroupNames.Add($groupName)
 
-        $getentResult = Invoke-SSHCommand `
-            -SessionId $SessionId `
+        $getentResult = Invoke-SshClientCommand `
+            -SshClient $SshClient `
             -Command   "getent group '$groupName'" `
             -ErrorAction Stop
 
@@ -72,8 +76,8 @@ function Invoke-GroupReconciliation {
             }
             $createCmd += " '$groupName'"
 
-            $r = Invoke-SSHCommand `
-                -SessionId $SessionId `
+            $r = Invoke-SshClientCommand `
+                -SshClient $SshClient `
                 -Command   $createCmd `
                 -ErrorAction Stop
 
@@ -81,16 +85,14 @@ function Invoke-GroupReconciliation {
                 throw "[$VmName] groupadd failed for '$groupName': $($r.Error)"
             }
 
-            # Write description to /etc/group (informational only;
-            # not read back for reconciliation - always overwritten).
             if ($null -ne $description -and "$description" -ne '') {
-                $r = Invoke-SSHCommand `
-                    -SessionId $SessionId `
-                    -Command   "sudo groupmod --comment '$description' '$groupName'" `
+                $r = Invoke-SshClientCommand `
+                    -SshClient $SshClient `
+                    -Command   "sudo gpasswd -c '$description' '$groupName'" `
                     -ErrorAction Stop
 
                 if ($r.ExitStatus -ne 0) {
-                    throw "[$VmName] groupmod --comment failed for '$groupName': $($r.Error)"
+                    throw "[$VmName] gpasswd -c failed for '$groupName': $($r.Error)"
                 }
             }
 
@@ -133,14 +135,14 @@ function Invoke-GroupReconciliation {
             continue  # Already handled in pass 1.
         }
 
-        $getentResult = Invoke-SSHCommand `
-            -SessionId $SessionId `
+        $getentResult = Invoke-SshClientCommand `
+            -SshClient $SshClient `
             -Command   "getent group '$groupName'" `
             -ErrorAction Stop
 
         if ($getentResult.ExitStatus -ne 0) {
-            $r = Invoke-SSHCommand `
-                -SessionId $SessionId `
+            $r = Invoke-SshClientCommand `
+                -SshClient $SshClient `
                 -Command   "sudo groupadd '$groupName'" `
                 -ErrorAction Stop
 

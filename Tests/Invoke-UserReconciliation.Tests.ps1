@@ -1,5 +1,5 @@
 BeforeAll {
-    function Invoke-SSHCommand { param($SessionId, $Command, $ErrorAction) }
+    function Invoke-SshClientCommand { param($SshClient, $Command, $ErrorAction) }
 
     . "$PSScriptRoot\..\hyper-v\ubuntu\reconcile-users.ps1"
 
@@ -41,7 +41,7 @@ Describe 'Invoke-UserReconciliation' {
         It 'treats a missing groups property as an empty list during useradd' {
             # groups is optional in the config schema. A user object without
             # the property must not throw under Set-StrictMode -Version Latest.
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'id*') {
                     New-SshResult 1
                 }
@@ -55,9 +55,9 @@ Describe 'Invoke-UserReconciliation' {
             $userWithNoGroupsProperty = [PSCustomObject]@{
                 username = 'u-deploy'; shell = '/bin/bash'; homeDir = '/home/u-deploy'
             }
-            { Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            { Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User $userWithNoGroupsProperty } | Should -Not -Throw
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*-G*'
             }
         }
@@ -68,7 +68,7 @@ Describe 'Invoke-UserReconciliation' {
     # ------------------------------------------------------------------
 
         It 'calls useradd with -m, -d, -s and the username when the user is absent' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'id*') {
                     New-SshResult 1
                 }
@@ -79,15 +79,15 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy')
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like "*useradd*-m*-d '/home/u-deploy'*-s '/bin/bash'*u-deploy*"
             }
         }
 
         It 'includes -G when the user has supplementary groups' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'id*') {
                     New-SshResult 1
                 }
@@ -98,15 +98,15 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker', 'runners'))
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like "*-G*docker*" -and $Command -like "*-G*runners*"
             }
         }
 
         It 'omits -G when the user has no supplementary groups' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'id*') {
                     New-SshResult 1
                 }
@@ -117,9 +117,9 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy')
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*-G*'
             }
         }
@@ -127,7 +127,7 @@ Describe 'Invoke-UserReconciliation' {
         It 'passes -g when a primary group with the same name already exists' {
             # Reproduces the case where the group was declared in the groups
             # config and created before user reconciliation runs.
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'id*') {
                     New-SshResult 1
                 }
@@ -138,15 +138,15 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-actions-runner')
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like "*useradd*-g*u-actions-runner*"
             }
         }
 
         It 'omits -g when no primary group with the same name exists' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'id*') {
                     New-SshResult 1
                 }
@@ -157,15 +157,15 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy')
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*useradd* -g *'
             }
         }
 
         It 'throws when useradd fails' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'id*') {
                     New-SshResult 1
                 }
@@ -176,7 +176,7 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 1 @() 'permission denied'
                 }
             }
-            { Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            { Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy') } |
                 Should -Throw -ExpectedMessage '*useradd failed*'
         }
@@ -190,7 +190,7 @@ Describe 'Invoke-UserReconciliation' {
             # homeDir is intentionally not reconciled - moving it risks data
             # loss. A Write-Warning must be emitted so the operator knows the
             # VM and config disagree; usermod must never be called.
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like "id '*'") {
                     New-SshResult 0
                 }
@@ -203,18 +203,18 @@ Describe 'Invoke-UserReconciliation' {
                 }
             }
             Mock Write-Warning {}
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/srv/custom-home' @())
             Should -Invoke Write-Warning -Times 1 -ParameterFilter {
                 $Message -like '*homeDir has drifted*'
             }
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*usermod*'
             }
         }
 
         It 'does not call usermod or Write-Warning when shell, groups and homeDir are correct' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'id*') {
                     New-SshResult 0
                 }
@@ -226,9 +226,9 @@ Describe 'Invoke-UserReconciliation' {
                 }
             }
             Mock Write-Warning {}
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker'))
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*usermod*'
             }
             Should -Invoke Write-Warning -Times 0
@@ -240,7 +240,7 @@ Describe 'Invoke-UserReconciliation' {
     # ------------------------------------------------------------------
 
         It 'calls usermod when the shell has changed' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like "id '*'") {
                     New-SshResult 0
                 }
@@ -254,15 +254,15 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash')
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like "*usermod*-s '/bin/bash'*"
             }
         }
 
         It 'throws when usermod fails' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like "id '*'") {
                     New-SshResult 0
                 }
@@ -276,7 +276,7 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 1 @() 'permission denied'
                 }
             }
-            { Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            { Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash') } |
                 Should -Throw -ExpectedMessage '*usermod failed*'
         }
@@ -287,7 +287,7 @@ Describe 'Invoke-UserReconciliation' {
     # ------------------------------------------------------------------
 
         It 'calls usermod with the new group name when supplementary groups have changed' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like "id '*'") {
                     New-SshResult 0
                 }
@@ -302,9 +302,9 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker'))
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like "*usermod*-G*docker*"
             }
         }
@@ -312,7 +312,7 @@ Describe 'Invoke-UserReconciliation' {
         It 'calls usermod with empty -G when all supplementary groups are removed' {
             # usermod -G '' removes all supplementary groups. An empty desired
             # list must not be skipped - it is a deliberate removal.
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like "id '*'") {
                     New-SshResult 0
                 }
@@ -327,9 +327,9 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @())
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like "*usermod*-G ''*"
             }
         }
@@ -342,7 +342,7 @@ Describe 'Invoke-UserReconciliation' {
         It 'does not call usermod when groups match but are listed in a different order on host' {
             # The comparison sorts both sides before comparing, so the on-disk
             # order returned by id -Gn must not be treated as drift.
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like "id '*'") {
                     New-SshResult 0
                 }
@@ -357,9 +357,9 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker', 'runners'))
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*usermod*'
             }
         }
@@ -378,7 +378,7 @@ Describe 'Invoke-UserReconciliation' {
             # from any non-empty desired homeDir, triggering a spurious
             # Write-Warning. Add ExitStatus checks before both comparisons
             # if this becomes a problem.
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like "id '*'") {
                     New-SshResult 0
                 }
@@ -392,9 +392,9 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash')
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like '*usermod*'
             }
         }
@@ -405,7 +405,7 @@ Describe 'Invoke-UserReconciliation' {
             # are non-empty this always appears as drift, triggering a spurious
             # usermod. Add an ExitStatus check before the groups comparison if
             # this becomes a problem.
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like "id '*'") {
                     New-SshResult 0
                 }
@@ -419,9 +419,9 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker'))
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like '*usermod*'
             }
         }
@@ -432,7 +432,7 @@ Describe 'Invoke-UserReconciliation' {
     # ------------------------------------------------------------------
 
         It 'issues a single usermod for both shell and group changes' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like "id '*'") {
                     New-SshResult 0
                 }
@@ -446,10 +446,10 @@ Describe 'Invoke-UserReconciliation' {
                     New-SshResult 0
                 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' '/bin/bash' '/home/u-deploy' @('docker'))
             # Both changes in one usermod call - not two separate calls.
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like "*usermod*-s '/bin/bash'*" -and $Command -like "*-G*docker*"
             }
         }
@@ -460,22 +460,22 @@ Describe 'Invoke-UserReconciliation' {
     # ------------------------------------------------------------------
 
         It 'calls chpasswd after creating a new user when password is in config' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'id*') { New-SshResult 1 }
                 elseif ($Command -like 'getent group*') { New-SshResult 1 }
                 else { New-SshResult 0 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' -Password 's3cret')
             # Verify the stdin pipe pattern: password must not appear as a
             # chpasswd argument (visible in ps aux on the remote host).
-            Should -Invoke Invoke-SSHCommand -Times 1 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -ParameterFilter {
                 $Command -like "echo*u-deploy*s3cret*|*chpasswd*"
             }
         }
 
         It 'calls chpasswd after updating an existing user when password is in config' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like "id '*'") { New-SshResult 0 }
                 elseif ($Command -like 'getent passwd*') {
                     New-SshResult 0 @('u-deploy:x:1001:1001::/home/u-deploy:/bin/bash')
@@ -483,17 +483,17 @@ Describe 'Invoke-UserReconciliation' {
                 elseif ($Command -like 'id -Gn*') { New-SshResult 0 @('u-deploy') }
                 else { New-SshResult 0 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' -Password 's3cret')
             # Same stdin pipe check as the create path - chpasswd must not
             # receive the password as a command-line argument.
-            Should -Invoke Invoke-SSHCommand -Times 1 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -ParameterFilter {
                 $Command -like "echo*u-deploy*s3cret*|*chpasswd*"
             }
         }
 
         It 'does not call chpasswd when password is absent from config' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like "id '*'") { New-SshResult 0 }
                 elseif ($Command -like 'getent passwd*') {
                     New-SshResult 0 @('u-deploy:x:1001:1001::/home/u-deploy:/bin/bash')
@@ -501,15 +501,15 @@ Describe 'Invoke-UserReconciliation' {
                 elseif ($Command -like 'id -Gn*') { New-SshResult 0 @('u-deploy') }
                 else { New-SshResult 0 }
             }
-            Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy')
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*chpasswd*'
             }
         }
 
         It 'throws when chpasswd fails' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'id*') { New-SshResult 1 }
                 elseif ($Command -like 'getent group*') { New-SshResult 1 }
                 elseif ($Command -like '*chpasswd*') {
@@ -517,7 +517,7 @@ Describe 'Invoke-UserReconciliation' {
                 }
                 else { New-SshResult 0 }
             }
-            { Invoke-UserReconciliation -SessionId 1 -VmName 'node-01' `
+            { Invoke-UserReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' -Password 's3cret') } |
                 Should -Throw -ExpectedMessage '*chpasswd failed*'
         }

@@ -1,11 +1,11 @@
 BeforeAll {
-    # Stub Invoke-SSHCommand before dot-sourcing so the function reference
+    # Stub Invoke-SshClientCommand before dot-sourcing so the function reference
     # resolves at load time. Tests override it per-context with Mock.
-    function Invoke-SSHCommand { param($SessionId, $Command, $ErrorAction) }
+    function Invoke-SshClientCommand { param($SshClient, $Command, $ErrorAction) }
 
     . "$PSScriptRoot\..\hyper-v\ubuntu\reconcile-groups.ps1"
 
-    # Builds a fake Invoke-SSHCommand result.
+    # Builds a fake Invoke-SshClientCommand result.
     #   -ExitStatus 0  : command succeeded (group found / operation ok)
     #   -ExitStatus 1  : command failed   (group absent / operation error)
     function New-SshResult([int] $ExitStatus, [string[]] $Output = @(), [string] $Err = '') {
@@ -35,64 +35,64 @@ Describe 'Invoke-GroupReconciliation' {
     # ------------------------------------------------------------------
 
         It 'creates the group when absent' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 # First call: getent (not found). Second call: groupadd (ok).
                 if ($Command -like 'getent*') { New-SshResult 1 }
                 else                          { New-SshResult 0 }
             }
-            { Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            { Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @(New-Group 'docker') -Users @() } |
                 Should -Not -Throw
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like '*groupadd*docker*'
             }
         }
 
         It 'creates the group with a pinned GID when gid is declared' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'getent*') { New-SshResult 1 }
                 else                          { New-SshResult 0 }
             }
-            Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @(New-GroupWithGid 'docker' 999) -Users @()
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like '*groupadd*-g 999*docker*'
             }
         }
 
         It 'throws when groupadd fails' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'getent*') { New-SshResult 1 }
                 else                          { New-SshResult 1 @() 'permission denied' }
             }
-            { Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            { Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @(New-Group 'docker') -Users @() } |
                 Should -Throw -ExpectedMessage '*groupadd failed*'
         }
 
-        It 'sets the description via groupmod --comment when description is declared' {
+        It 'sets the description via gpasswd -c when description is declared' {
             $group = [PSCustomObject]@{ groupName = 'docker'; description = 'Container runtime' }
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'getent*')   { New-SshResult 1 }
                 else                            { New-SshResult 0 }
             }
-            Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @($group) -Users @()
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
-                $Command -like "*groupmod --comment*Container runtime*docker*"
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
+                $Command -like "*gpasswd -c*Container runtime*docker*"
             }
         }
 
-        It 'throws when groupmod --comment fails' {
+        It 'throws when gpasswd -c fails' {
             $group = [PSCustomObject]@{ groupName = 'docker'; description = 'Container runtime' }
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'getent*')         { New-SshResult 1 }
                 elseif ($Command -like '*groupadd*')  { New-SshResult 0 }
                 else                                  { New-SshResult 1 @() 'permission denied' }
             }
-            { Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            { Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @($group) -Users @() } |
-                Should -Throw -ExpectedMessage '*groupmod --comment failed*'
+                Should -Throw -ExpectedMessage '*gpasswd -c failed*'
         }
     }
 
@@ -101,40 +101,40 @@ Describe 'Invoke-GroupReconciliation' {
     # ------------------------------------------------------------------
 
         It 'does not call groupadd when the group already exists' {
-            Mock Invoke-SSHCommand { New-SshResult 0 @('docker:x:999:') }
-            Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            Mock Invoke-SshClientCommand { New-SshResult 0 @('docker:x:999:') }
+            Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @(New-Group 'docker') -Users @()
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*groupadd*'
             }
         }
 
         It 'does not throw when the existing GID matches the declared GID' {
-            Mock Invoke-SSHCommand { New-SshResult 0 @('docker:x:999:') }
-            { Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            Mock Invoke-SshClientCommand { New-SshResult 0 @('docker:x:999:') }
+            { Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @(New-GroupWithGid 'docker' 999) -Users @() } |
                 Should -Not -Throw
         }
 
         It 'throws when the existing GID conflicts with the declared GID' {
-            Mock Invoke-SSHCommand { New-SshResult 0 @('docker:x:123:') }
-            { Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            Mock Invoke-SshClientCommand { New-SshResult 0 @('docker:x:123:') }
+            { Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @(New-GroupWithGid 'docker' 999) -Users @() } |
                 Should -Throw -ExpectedMessage '*GID*'
         }
 
         It 'does not set description when the group already exists' {
-            # KNOWN BEHAVIOUR: groupmod --comment is only called during group
-            # creation. If the group is already present on the host, its
-            # description field in /etc/group is not reconciled. A pre-existing
-            # group that has a different (or no) description will not be updated.
-            # To change the description of an existing group, run groupmod manually.
+            # KNOWN BEHAVIOUR: gpasswd -c is only called during group creation.
+            # If the group is already present on the host, its description in
+            # /etc/gshadow is not reconciled. A pre-existing group that has a
+            # different (or no) description will not be updated.
+            # To change the description of an existing group, run gpasswd -c manually.
             $group = [PSCustomObject]@{ groupName = 'docker'; description = 'Container runtime' }
-            Mock Invoke-SSHCommand { New-SshResult 0 @('docker:x:999:') }
-            Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            Mock Invoke-SshClientCommand { New-SshResult 0 @('docker:x:999:') }
+            Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @($group) -Users @()
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
-                $Command -like '*groupmod*'
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
+                $Command -like '*gpasswd*'
             }
         }
     }
@@ -144,14 +144,14 @@ Describe 'Invoke-GroupReconciliation' {
     # ------------------------------------------------------------------
 
         It 'creates an implicit group when absent' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'getent*') { New-SshResult 1 }
                 else                          { New-SshResult 0 }
             }
             $users = @(New-User 'u-deploy' @('docker'))
-            Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @() -Users $users
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like "*groupadd*docker*"
             }
         }
@@ -159,11 +159,11 @@ Describe 'Invoke-GroupReconciliation' {
         It 'does not create an implicit group that is already declared' {
             # docker is in DeclaredGroups and exists - the implicit pass must
             # not issue a second groupadd for it.
-            Mock Invoke-SSHCommand { New-SshResult 0 @('docker:x:999:') }
+            Mock Invoke-SshClientCommand { New-SshResult 0 @('docker:x:999:') }
             $users = @(New-User 'u-deploy' @('docker'))
-            Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @(New-Group 'docker') -Users $users
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*groupadd*'
             }
         }
@@ -171,11 +171,11 @@ Describe 'Invoke-GroupReconciliation' {
         It 'does not call groupadd when the implicit group already exists on host' {
             # Idempotency: if the group is already present on the host (getent
             # succeeds) the implicit pass must not attempt to create it again.
-            Mock Invoke-SSHCommand { New-SshResult 0 @('docker:x:999:') }
+            Mock Invoke-SshClientCommand { New-SshResult 0 @('docker:x:999:') }
             $users = @(New-User 'u-deploy' @('docker'))
-            Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @() -Users $users
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*groupadd*'
             }
         }
@@ -188,25 +188,25 @@ Describe 'Invoke-GroupReconciliation' {
             # PowerShell's command-mode parsing treats the comma as part of the
             # first call's argument list, passing the second function call's name
             # as a string into $Groups - adding a phantom group to the test data.
-            Mock Invoke-SSHCommand { New-SshResult 0 @('docker:x:999:') }
+            Mock Invoke-SshClientCommand { New-SshResult 0 @('docker:x:999:') }
             $users = @(
                 (New-User 'u-deploy' @('docker')),
                 (New-User 'u-runner' @('docker'))
             )
-            Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @() -Users $users
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like "*getent*docker*"
             }
         }
 
         It 'throws when implicit groupadd fails' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like 'getent*') { New-SshResult 1 }
                 else                          { New-SshResult 1 @() 'permission denied' }
             }
             $users = @(New-User 'u-deploy' @('docker'))
-            { Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            { Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @() -Users $users } |
                 Should -Throw -ExpectedMessage '*groupadd failed*'
         }
@@ -214,11 +214,11 @@ Describe 'Invoke-GroupReconciliation' {
         It 'skips empty group strings from users with no groups' {
             # A user with no groups produces an empty string in the pipeline;
             # that must not trigger a groupadd for an empty name.
-            Mock Invoke-SSHCommand {}
+            Mock Invoke-SshClientCommand {}
             $users = @(New-User 'u-deploy' @())
-            { Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            { Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @() -Users $users } | Should -Not -Throw
-            Should -Invoke Invoke-SSHCommand -Times 0
+            Should -Invoke Invoke-SshClientCommand -Times 0
         }
     }
 
@@ -227,11 +227,11 @@ Describe 'Invoke-GroupReconciliation' {
     # ------------------------------------------------------------------
 
         It 'does nothing when DeclaredGroups is empty and Users have no groups' {
-            Mock Invoke-SSHCommand {}
-            { Invoke-GroupReconciliation -SessionId 1 -VmName 'node-01' `
+            Mock Invoke-SshClientCommand {}
+            { Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -DeclaredGroups @() -Users @(New-User 'u-deploy') } |
                 Should -Not -Throw
-            Should -Invoke Invoke-SSHCommand -Times 0
+            Should -Invoke Invoke-SshClientCommand -Times 0
         }
     }
 }

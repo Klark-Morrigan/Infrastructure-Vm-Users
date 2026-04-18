@@ -1,5 +1,5 @@
 BeforeAll {
-    function Invoke-SSHCommand { param($SessionId, $Command, $ErrorAction) }
+    function Invoke-SshClientCommand { param($SshClient, $Command, $ErrorAction) }
 
     . "$PSScriptRoot\..\hyper-v\ubuntu\reconcile-sudoers.ps1"
 
@@ -24,13 +24,13 @@ Describe 'Invoke-SudoersReconciliation' {
             # reconcile-sudoers.ps1 uses Get-Member to guard the read, defaulting
             # to an empty array, so the function must behave identically to a
             # user with sudoersRules = @() when no sudoers file is present.
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 New-SshResult 0 @('absent')  # test -f: file absent
             }
             $userWithNoRulesProperty = [PSCustomObject]@{ username = 'u-deploy' }
-            { Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' `
+            { Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User $userWithNoRulesProperty } | Should -Not -Throw
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*tee*' -or $Command -like '*mv*' -or $Command -like '*rm*'
             }
         }
@@ -41,13 +41,13 @@ Describe 'Invoke-SudoersReconciliation' {
     # ------------------------------------------------------------------
 
         It 'does nothing' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 # test -f: file absent
                 New-SshResult 0 @('absent')
             }
-            { Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' `
+            { Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy') } | Should -Not -Throw
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*tee*' -or $Command -like '*mv*' -or $Command -like '*rm*'
             }
         }
@@ -58,23 +58,23 @@ Describe 'Invoke-SudoersReconciliation' {
     # ------------------------------------------------------------------
 
         It 'removes the file' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like '*test -f*') { New-SshResult 0 @('exists') }
                 else                            { New-SshResult 0 }
             }
-            Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy')
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like "*rm '/etc/sudoers.d/u-deploy'*"
             }
         }
 
         It 'throws when rm fails' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like '*test -f*') { New-SshResult 0 @('exists') }
                 else                            { New-SshResult 1 @() 'permission denied' }
             }
-            { Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' `
+            { Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy') } |
                 Should -Throw -ExpectedMessage '*Failed to remove sudoers*'
         }
@@ -87,7 +87,7 @@ Describe 'Invoke-SudoersReconciliation' {
         BeforeEach {
             # Sequence: test (absent), tee, chmod, visudo, mv - all succeed.
             $script:_callIndex = 0
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 $script:_callIndex++
                 switch ($script:_callIndex) {
                     1 { New-SshResult 0 @('absent') }  # test -f
@@ -101,17 +101,17 @@ Describe 'Invoke-SudoersReconciliation' {
 
         It 'writes the file via the full tee/chmod/visudo/mv pipeline' {
             $user = New-User 'u-deploy' @('u-deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl')
-            Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' -User $user
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' -User $user
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like '*tee*'
             }
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like '*chmod 0440*'
             }
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like '*visudo -c -f*'
             }
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like "*mv*sudoers.d/u-deploy*"
             }
         }
@@ -123,13 +123,13 @@ Describe 'Invoke-SudoersReconciliation' {
 
         It 'does not rewrite the file when rules are unchanged' {
             $rule = 'u-deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl'
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like '*test -f*') { New-SshResult 0 @('exists') }
                 else                            { New-SshResult 0 @($rule) }
             }
-            Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' @($rule))
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*tee*' -or $Command -like '*mv*'
             }
         }
@@ -140,15 +140,15 @@ Describe 'Invoke-SudoersReconciliation' {
     # ------------------------------------------------------------------
 
         It 'rewrites the file when rules have changed' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if      ($Command -like '*test -f*') { New-SshResult 0 @('exists') }
                 elseif  ($Command -like '*cat*')     { New-SshResult 0 @('old rule') }
                 else                                 { New-SshResult 0 }
             }
             $user = New-User 'u-deploy' @('new rule')
-            { Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' -User $user } |
+            { Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' -User $user } |
                 Should -Not -Throw
-            Should -Invoke Invoke-SSHCommand -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -ParameterFilter {
                 $Command -like "*mv*sudoers*"
             }
         }
@@ -162,7 +162,7 @@ Describe 'Invoke-SudoersReconciliation' {
             # Rule precedence depends on order so the comparison is order-sensitive.
             # The same rules in a different sequence must trigger a rewrite so
             # that the on-disk file always matches the config's intended order.
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if      ($Command -like '*test -f*') { New-SshResult 0 @('exists') }
                 elseif  ($Command -like '*cat*')     {
                     New-SshResult 0 @(
@@ -176,9 +176,9 @@ Describe 'Invoke-SudoersReconciliation' {
                 'u-deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl',
                 'u-deploy ALL=(ALL) NOPASSWD: /usr/bin/journalctl'
             )
-            { Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' `
+            { Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' $rules) } | Should -Not -Throw
-            Should -Invoke Invoke-SSHCommand -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -ParameterFilter {
                 $Command -like "*mv*sudoers*"
             }
         }
@@ -187,14 +187,14 @@ Describe 'Invoke-SudoersReconciliation' {
             # The cat output is normalised (trimmed, blank lines dropped) before
             # comparison, so a trailing newline in the file must not cause drift.
             $rule = 'u-deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl'
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if      ($Command -like '*test -f*') { New-SshResult 0 @('exists') }
                 elseif  ($Command -like '*cat*')     { New-SshResult 0 @($rule, '', '  ') }
                 else                                 { New-SshResult 0 }
             }
-            Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' `
+            Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' @($rule))
-            Should -Invoke Invoke-SSHCommand -Times 0 -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*tee*' -or $Command -like '*mv*'
             }
         }
@@ -207,14 +207,14 @@ Describe 'Invoke-SudoersReconciliation' {
             # desired rules trigger the full write pipeline as if the file were
             # absent. Add an ExitStatus check before reading Output if this
             # silent false-absent ever causes problems in production.
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if      ($Command -like '*test -f*') { New-SshResult 1 }  # SSH fails
                 else                                 { New-SshResult 0 }
             }
             $user = New-User 'u-deploy' @('u-deploy ALL=(ALL) NOPASSWD: ALL')
-            { Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' -User $user } |
+            { Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' -User $user } |
                 Should -Not -Throw
-            Should -Invoke Invoke-SSHCommand -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -ParameterFilter {
                 $Command -like "*mv*sudoers*"
             }
         }
@@ -225,15 +225,15 @@ Describe 'Invoke-SudoersReconciliation' {
             # non-empty desired rules, so the file is always rewritten silently.
             # If this ever becomes a problem (e.g. cat fails due to permissions
             # on the live file), add an ExitStatus check before the comparison.
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if      ($Command -like '*test -f*') { New-SshResult 0 @('exists') }
                 elseif  ($Command -like '*cat*')     { New-SshResult 1 }
                 else                                 { New-SshResult 0 }
             }
             $user = New-User 'u-deploy' @('u-deploy ALL=(ALL) NOPASSWD: ALL')
-            { Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' -User $user } |
+            { Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' -User $user } |
                 Should -Not -Throw
-            Should -Invoke Invoke-SSHCommand -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -ParameterFilter {
                 $Command -like "*mv*sudoers*"
             }
         }
@@ -244,7 +244,7 @@ Describe 'Invoke-SudoersReconciliation' {
     # ------------------------------------------------------------------
 
         It 'writes all rules joined by newlines' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if      ($Command -like '*test -f*') { New-SshResult 0 @('absent') }
                 else                                 { New-SshResult 0 }
             }
@@ -252,12 +252,12 @@ Describe 'Invoke-SudoersReconciliation' {
                 'u-deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl',
                 'u-deploy ALL=(ALL) NOPASSWD: /usr/bin/journalctl'
             )
-            { Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' `
+            { Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy' $rules) } | Should -Not -Throw
             # Both rules must appear in the base64-encoded tee command. Verify
             # by decoding the b64 payload from the captured command.
             $script:_teeCommand = $null
-            Should -Invoke Invoke-SSHCommand -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -ParameterFilter {
                 if ($Command -like "*tee*") { $script:_teeCommand = $Command }
                 $Command -like "*tee*"
             }
@@ -273,18 +273,18 @@ Describe 'Invoke-SudoersReconciliation' {
     # ------------------------------------------------------------------
 
         It 'throws when tee fails' {
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 if ($Command -like '*test -f*') { New-SshResult 0 @('absent') }
                 else                            { New-SshResult 1 @() 'no space left' }
             }
             $user = New-User 'u-deploy' @('u-deploy ALL=(ALL) NOPASSWD: ALL')
-            { Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' -User $user } |
+            { Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' -User $user } |
                 Should -Throw -ExpectedMessage '*Failed to write temp sudoers*'
         }
 
         It 'throws and cleans up temp file when chmod fails' {
             $script:_callIndex = 0
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 $script:_callIndex++
                 switch ($script:_callIndex) {
                     1 { New-SshResult 0 @('absent') }  # test -f
@@ -294,16 +294,16 @@ Describe 'Invoke-SudoersReconciliation' {
                 }
             }
             $user = New-User 'u-deploy' @('u-deploy ALL=(ALL) NOPASSWD: ALL')
-            { Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' -User $user } |
+            { Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' -User $user } |
                 Should -Throw -ExpectedMessage '*chmod failed*'
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like '*rm -f*'
             }
         }
 
         It 'throws and cleans up temp file when visudo fails' {
             $script:_callIndex = 0
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 $script:_callIndex++
                 switch ($script:_callIndex) {
                     1 { New-SshResult 0 @('absent') }                    # test -f
@@ -314,16 +314,16 @@ Describe 'Invoke-SudoersReconciliation' {
                 }
             }
             $user = New-User 'u-deploy' @('bad rule')
-            { Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' -User $user } |
+            { Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' -User $user } |
                 Should -Throw -ExpectedMessage '*visudo validation failed*'
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like '*rm -f*'
             }
         }
 
         It 'throws and cleans up temp file when mv fails' {
             $script:_callIndex = 0
-            Mock Invoke-SSHCommand {
+            Mock Invoke-SshClientCommand {
                 $script:_callIndex++
                 switch ($script:_callIndex) {
                     1 { New-SshResult 0 @('absent') }  # test -f
@@ -335,9 +335,9 @@ Describe 'Invoke-SudoersReconciliation' {
                 }
             }
             $user = New-User 'u-deploy' @('u-deploy ALL=(ALL) NOPASSWD: ALL')
-            { Invoke-SudoersReconciliation -SessionId 1 -VmName 'node-01' -User $user } |
+            { Invoke-SudoersReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' -User $user } |
                 Should -Throw -ExpectedMessage '*Failed to install sudoers*'
-            Should -Invoke Invoke-SSHCommand -Times 1 -Exactly -ParameterFilter {
+            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
                 $Command -like '*rm -f*'
             }
         }
