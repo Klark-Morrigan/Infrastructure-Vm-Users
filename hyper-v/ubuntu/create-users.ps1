@@ -31,7 +31,7 @@ $ErrorActionPreference = 'Stop'
 # latter is auto-installed below), so we do not silently install them here.
 $_common = Get-Module -ListAvailable -Name Infrastructure.Common |
     Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'1.0.3') {
+if (-not $_common -or $_common.Version -lt [Version]'1.2.0') {
     Install-Module Infrastructure.Common -Scope CurrentUser -Force
 }
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
@@ -47,13 +47,14 @@ Import-Module Infrastructure.Common -Force -ErrorAction Stop
 Import-Module Infrastructure.Secrets                    -ErrorAction Stop
 Import-Module Microsoft.PowerShell.SecretManagement    -ErrorAction Stop
 
-# Posh-SSH provides New-SSHSession / Invoke-SSHCommand for password-based
-# SSH from Windows PowerShell. The provisioner does not set up key-based
-# auth, so we authenticate with the admin username/password from the vault.
-# Unlike Infrastructure.Secrets (one-time setup), Posh-SSH is a runtime
-# dependency - Invoke-ModuleInstall keeps the operational workflow
-# self-contained.
-Invoke-ModuleInstall -ModuleName 'Posh-SSH' -MinimumVersion '3.0.0'
+# Posh-SSH is installed here solely to obtain its bundled Renci.SshNet.dll.
+# Posh-SSH's own cmdlets (New-SSHSession, Invoke-SSHCommand) are NOT used
+# because ConnectionInfoGenerator in Posh-SSH 3.x has a bug that drops
+# algorithm entries from the SSH.NET ConnectionInfo, causing "Key exchange
+# negotiation failed" against OpenSSH 9.x (Ubuntu 24.04). SSH.NET is used
+# directly instead via Invoke-SshCommand (Infrastructure.Common) and the
+# connection block in the reconciliation loop below.
+Invoke-ModuleInstall -ModuleName 'Posh-SSH'
 
 # ---------------------------------------------------------------------------
 # 1. Read VmProvisionerConfig from the VmProvisioner vault
@@ -183,18 +184,25 @@ foreach ($t in $reachable) {
     Write-Host "[$name] Connecting to $($prov.ipAddress) as '$($prov.username)' ..." `
         -ForegroundColor Cyan
 
-    $credential = [PSCredential]::new(
-        $prov.username,
-        ($prov.password | ConvertTo-SecureString -AsPlainText -Force)
-    )
-
-    $session = New-SSHSession `
-        -ComputerName $prov.ipAddress `
-        -Credential   $credential `
-        -AcceptKey `
-        -ErrorAction  Stop
+    # $sshClient is declared before the try so the finally block can always
+    # reference it, even when Connect() throws before the assignment.
+    $sshClient = $null
 
     try {
+        # Connect via SSH.NET directly, bypassing Posh-SSH's wrapper.
+        # See the Posh-SSH comment above for why this is necessary.
+        #
+        # Security note: SSH.NET accepts any host key by default (no
+        # HostKeyReceived handler). This is equivalent to Posh-SSH's
+        # -AcceptKey and is acceptable on a private Hyper-V network with
+        # statically provisioned IPs. Do NOT use on untrusted networks.
+        $auth      = [Renci.SshNet.PasswordAuthenticationMethod]::new(
+                         $prov.username, $prov.password)
+        $connInfo  = [Renci.SshNet.ConnectionInfo]::new(
+                         $prov.ipAddress, $prov.username, @($auth))
+        $sshClient = [Renci.SshNet.SshClient]::new($connInfo)
+        $sshClient.Connect()
+
         # Get-Member is used to check for the optional 'groups' property
         # without triggering StrictMode on a missing key.
         $entryMembers   = (Get-Member -InputObject $t.Entry -MemberType NoteProperty).Name
@@ -206,7 +214,7 @@ foreach ($t in $reachable) {
 
         # 5a. Groups must exist before users reference them in useradd/usermod.
         Invoke-GroupReconciliation `
-            -SessionId      $session.SessionId `
+            -SshClient      $sshClient `
             -VmName         $name `
             -DeclaredGroups $declaredGroups `
             -Users          $users
@@ -214,20 +222,26 @@ foreach ($t in $reachable) {
         foreach ($user in $users) {
             # 5b. Ensure the user exists with the correct shell and groups.
             Invoke-UserReconciliation `
-                -SessionId $session.SessionId `
+                -SshClient $sshClient `
                 -VmName    $name `
                 -User      $user
 
             # 5c. Ensure the sudoers file matches desired rules.
             Invoke-SudoersReconciliation `
-                -SessionId $session.SessionId `
+                -SshClient $sshClient `
                 -VmName    $name `
                 -User      $user
         }
     }
+    catch [Renci.SshNet.Common.SshConnectionException] {
+        Write-Error "[$name] SSH connection failed: $($_.Exception.Message)"
+    }
     finally {
-        # Always close the session to release the TCP connection, even if
-        # an operation above threw.
-        Remove-SSHSession -SessionId $session.SessionId | Out-Null
+        # Always release the TCP connection, even if Connect() or an
+        # operation above threw.
+        if ($null -ne $sshClient) {
+            if ($sshClient.IsConnected) { $sshClient.Disconnect() }
+            $sshClient.Dispose()
+        }
     }
 }

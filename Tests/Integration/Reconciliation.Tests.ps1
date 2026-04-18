@@ -5,7 +5,7 @@
 # ENVIRONMENT
 #   Runs inside mcr.microsoft.com/powershell (Ubuntu-based). BeforeAll installs
 #   openssh-server, creates a test admin user with passwordless sudo, starts
-#   sshd, and opens a Posh-SSH session to localhost. All reconciliation
+#   sshd, and opens an SSH.NET session to localhost. All reconciliation
 #   functions run through that session exactly as they would against a real VM.
 #
 # ISOLATION
@@ -119,40 +119,47 @@ BeforeAll {
     Start-Sleep -Seconds 1
 
     # -----------------------------------------------------------------------
-    # 5. Install Posh-SSH and dot-source reconciliation functions
+    # 5. Install Infrastructure.Common (provides Invoke-SshCommand), then
+    #    Posh-SSH (for its bundled SSH.NET DLL), and dot-source reconciliation
+    #    functions. Posh-SSH cmdlets are NOT used - SSH.NET is used directly
+    #    to avoid the Posh-SSH 3.x ConnectionInfoGenerator bug that drops
+    #    algorithm entries and causes KEX failure against OpenSSH 9.x.
     # -----------------------------------------------------------------------
 
-    Write-Step 5 'installing Posh-SSH from PSGallery'
+    Write-Step 5 'installing Infrastructure.Common from PSGallery'
+
+    # Fresh container - bootstrap without Invoke-ModuleInstall.
+    Install-Module Infrastructure.Common -MinimumVersion '1.2.0' `
+        -Scope CurrentUser -Force -SkipPublisherCheck
+    Import-Module Infrastructure.Common -Force -ErrorAction Stop
+
+    Write-Step 5 'installing Posh-SSH (SSH.NET carrier) from PSGallery'
 
     Install-Module Posh-SSH -MinimumVersion 3.0.0 `
         -Scope CurrentUser -Force -SkipPublisherCheck
+    # Import-Module loads the bundled Renci.SshNet.dll into the session.
     Import-Module Posh-SSH
 
     Write-Step 5 'dot-sourcing reconciliation functions'
 
     $src = [IO.Path]::Combine($PSScriptRoot, '..', '..', 'hyper-v', 'ubuntu')
+    . ([IO.Path]::Combine($src, 'common.ps1'))
     . ([IO.Path]::Combine($src, 'reconcile-groups.ps1'))
     . ([IO.Path]::Combine($src, 'reconcile-users.ps1'))
     . ([IO.Path]::Combine($src, 'reconcile-sudoers.ps1'))
 
     # -----------------------------------------------------------------------
-    # 6. Open SSH session to localhost
+    # 6. Open SSH session to localhost via SSH.NET directly.
     # -----------------------------------------------------------------------
 
     Write-Step 6 'opening SSH session to localhost'
 
-    $credential = [PSCredential]::new(
-        $Script:AdminUser,
-        ($Script:AdminPass | ConvertTo-SecureString -AsPlainText -Force)
-    )
-
-    $Script:Session = New-SSHSession `
-        -ComputerName localhost `
-        -Credential   $credential `
-        -AcceptKey    `
-        -ErrorAction  Stop
-
-    $Script:SessionId = $Script:Session.SessionId
+    $auth             = [Renci.SshNet.PasswordAuthenticationMethod]::new(
+                            $Script:AdminUser, $Script:AdminPass)
+    $connInfo         = [Renci.SshNet.ConnectionInfo]::new(
+                            'localhost', $Script:AdminUser, @($auth))
+    $Script:SshClient = [Renci.SshNet.SshClient]::new($connInfo)
+    $Script:SshClient.Connect()
     $Script:VmName    = 'test-vm'
 
     # -----------------------------------------------------------------------
@@ -165,7 +172,7 @@ BeforeAll {
 
     function Invoke-SshQuery {
         param([string] $Command)
-        $r = Invoke-SSHCommand -SessionId $Script:SessionId -Command $Command `
+        $r = Invoke-SshCommand -SshClient $Script:SshClient -Command $Command `
             -ErrorAction Stop
         return ($r.Output -join '').Trim()
     }
@@ -174,8 +181,9 @@ BeforeAll {
 }
 
 AfterAll {
-    if ($null -ne $Script:Session) {
-        Remove-SSHSession -SessionId $Script:SessionId | Out-Null
+    if ($null -ne $Script:SshClient) {
+        if ($Script:SshClient.IsConnected) { $Script:SshClient.Disconnect() }
+        $Script:SshClient.Dispose()
     }
 
     # Remove all test artifacts. Suppress errors - some may not exist if a
@@ -201,7 +209,7 @@ Describe 'Invoke-GroupReconciliation' {
         $group = [PSCustomObject]@{ groupName = 'infra-t-group' }
 
         Invoke-GroupReconciliation `
-            -SessionId      $Script:SessionId `
+            -SshClient      $Script:SshClient `
             -VmName         $Script:VmName `
             -DeclaredGroups @($group) `
             -Users          @()
@@ -215,7 +223,7 @@ Describe 'Invoke-GroupReconciliation' {
         $group = [PSCustomObject]@{ groupName = 'infra-t-group' }
 
         { Invoke-GroupReconciliation `
-            -SessionId      $Script:SessionId `
+            -SshClient      $Script:SshClient `
             -VmName         $Script:VmName `
             -DeclaredGroups @($group) `
             -Users          @()
@@ -226,7 +234,7 @@ Describe 'Invoke-GroupReconciliation' {
         $group = [PSCustomObject]@{ groupName = 'infra-t-group'; gid = 19500 }
 
         Invoke-GroupReconciliation `
-            -SessionId      $Script:SessionId `
+            -SshClient      $Script:SshClient `
             -VmName         $Script:VmName `
             -DeclaredGroups @($group) `
             -Users          @()
@@ -241,7 +249,7 @@ Describe 'Invoke-GroupReconciliation' {
         $group = [PSCustomObject]@{ groupName = 'infra-t-group'; gid = 19502 }
 
         { Invoke-GroupReconciliation `
-            -SessionId      $Script:SessionId `
+            -SshClient      $Script:SshClient `
             -VmName         $Script:VmName `
             -DeclaredGroups @($group) `
             -Users          @()
@@ -257,7 +265,7 @@ Describe 'Invoke-GroupReconciliation' {
         }
 
         Invoke-GroupReconciliation `
-            -SessionId      $Script:SessionId `
+            -SshClient      $Script:SshClient `
             -VmName         $Script:VmName `
             -DeclaredGroups @() `
             -Users          @($user)
@@ -290,7 +298,7 @@ Describe 'Invoke-UserReconciliation' {
         }
 
         Invoke-UserReconciliation `
-            -SessionId $Script:SessionId `
+            -SshClient $Script:SshClient `
             -VmName    $Script:VmName `
             -User      $user
 
@@ -307,7 +315,7 @@ Describe 'Invoke-UserReconciliation' {
         }
 
         Invoke-UserReconciliation `
-            -SessionId $Script:SessionId `
+            -SshClient $Script:SshClient `
             -VmName    $Script:VmName `
             -User      $user
 
@@ -322,13 +330,13 @@ Describe 'Invoke-UserReconciliation' {
         }
 
         Invoke-UserReconciliation `
-            -SessionId $Script:SessionId `
+            -SshClient $Script:SshClient `
             -VmName    $Script:VmName `
             -User      $user
 
         # Second call - must not throw.
         { Invoke-UserReconciliation `
-            -SessionId $Script:SessionId `
+            -SshClient $Script:SshClient `
             -VmName    $Script:VmName `
             -User      $user
         } | Should -Not -Throw
@@ -344,7 +352,7 @@ Describe 'Invoke-UserReconciliation' {
         }
 
         Invoke-UserReconciliation `
-            -SessionId $Script:SessionId `
+            -SshClient $Script:SshClient `
             -VmName    $Script:VmName `
             -User      $user
 
@@ -363,7 +371,7 @@ Describe 'Invoke-UserReconciliation' {
         }
 
         Invoke-UserReconciliation `
-            -SessionId $Script:SessionId `
+            -SshClient $Script:SshClient `
             -VmName    $Script:VmName `
             -User      $user
 
@@ -383,20 +391,21 @@ Describe 'Invoke-UserReconciliation' {
         }
 
         Invoke-UserReconciliation `
-            -SessionId $Script:SessionId `
+            -SshClient $Script:SshClient `
             -VmName    $Script:VmName `
             -User      $user
 
-        $cred = [PSCredential]::new(
-            'infra-t-user',
-            ($testPass | ConvertTo-SecureString -AsPlainText -Force)
-        )
-        $userSession = New-SSHSession `
-            -ComputerName localhost `
-            -Credential   $cred `
-            -AcceptKey    `
-            -ErrorAction  Stop
-        Remove-SSHSession -SessionId $userSession.SessionId | Out-Null
+        # Open a second SSH.NET connection as the test user to prove chpasswd
+        # set the password correctly - the only reliable verification is to
+        # authenticate with it.
+        $userAuth     = [Renci.SshNet.PasswordAuthenticationMethod]::new(
+                            'infra-t-user', $testPass)
+        $userConnInfo = [Renci.SshNet.ConnectionInfo]::new(
+                            'localhost', 'infra-t-user', @($userAuth))
+        $userClient   = [Renci.SshNet.SshClient]::new($userConnInfo)
+        $userClient.Connect()
+        $userClient.Disconnect()
+        $userClient.Dispose()
     }
 
     It 'emits a warning but does not move the directory when homeDir drifts' {
@@ -410,7 +419,7 @@ Describe 'Invoke-UserReconciliation' {
         }
 
         Invoke-UserReconciliation `
-            -SessionId       $Script:SessionId `
+            -SshClient       $Script:SshClient `
             -VmName          $Script:VmName `
             -User            $user `
             -WarningVariable warnings
@@ -451,7 +460,7 @@ Describe 'Invoke-SudoersReconciliation' {
         }
 
         Invoke-SudoersReconciliation `
-            -SessionId $Script:SessionId `
+            -SshClient $Script:SshClient `
             -VmName    $Script:VmName `
             -User      $user
 
@@ -469,13 +478,13 @@ Describe 'Invoke-SudoersReconciliation' {
         }
 
         Invoke-SudoersReconciliation `
-            -SessionId $Script:SessionId `
+            -SshClient $Script:SshClient `
             -VmName    $Script:VmName `
             -User      $user
 
         # Second call - must not throw and file content must be unchanged.
         { Invoke-SudoersReconciliation `
-            -SessionId $Script:SessionId `
+            -SshClient $Script:SshClient `
             -VmName    $Script:VmName `
             -User      $user
         } | Should -Not -Throw
@@ -494,7 +503,7 @@ Describe 'Invoke-SudoersReconciliation' {
         }
 
         Invoke-SudoersReconciliation `
-            -SessionId $Script:SessionId `
+            -SshClient $Script:SshClient `
             -VmName    $Script:VmName `
             -User      $user
 
@@ -514,7 +523,7 @@ Describe 'Invoke-SudoersReconciliation' {
         }
 
         Invoke-SudoersReconciliation `
-            -SessionId $Script:SessionId `
+            -SshClient $Script:SshClient `
             -VmName    $Script:VmName `
             -User      $user
 

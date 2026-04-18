@@ -24,7 +24,7 @@ function Invoke-GroupReconciliation {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [int] $SessionId,
+        [object] $SshClient,
 
         [Parameter(Mandatory)]
         [string] $VmName,
@@ -59,8 +59,8 @@ function Invoke-GroupReconciliation {
 
         $null = $declaredGroupNames.Add($groupName)
 
-        $getentResult = Invoke-SSHCommand `
-            -SessionId $SessionId `
+        $getentResult = Invoke-SshCommand `
+            -SshClient $SshClient `
             -Command   "getent group '$groupName'" `
             -ErrorAction Stop
 
@@ -72,8 +72,8 @@ function Invoke-GroupReconciliation {
             }
             $createCmd += " '$groupName'"
 
-            $r = Invoke-SSHCommand `
-                -SessionId $SessionId `
+            $r = Invoke-SshCommand `
+                -SshClient $SshClient `
                 -Command   $createCmd `
                 -ErrorAction Stop
 
@@ -84,13 +84,13 @@ function Invoke-GroupReconciliation {
             # Write description to /etc/group (informational only;
             # not read back for reconciliation - always overwritten).
             if ($null -ne $description -and "$description" -ne '') {
-                $r = Invoke-SSHCommand `
-                    -SessionId $SessionId `
-                    -Command   "sudo groupmod --comment '$description' '$groupName'" `
+                $r = Invoke-SshCommand `
+                    -SshClient $SshClient `
+                    -Command   "sudo gpasswd -c '$description' '$groupName'" `
                     -ErrorAction Stop
 
                 if ($r.ExitStatus -ne 0) {
-                    throw "[$VmName] groupmod --comment failed for '$groupName': $($r.Error)"
+                    throw "[$VmName] gpasswd -c failed for '$groupName': $($r.Error)"
                 }
             }
 
@@ -133,14 +133,14 @@ function Invoke-GroupReconciliation {
             continue  # Already handled in pass 1.
         }
 
-        $getentResult = Invoke-SSHCommand `
-            -SessionId $SessionId `
+        $getentResult = Invoke-SshCommand `
+            -SshClient $SshClient `
             -Command   "getent group '$groupName'" `
             -ErrorAction Stop
 
         if ($getentResult.ExitStatus -ne 0) {
-            $r = Invoke-SSHCommand `
-                -SessionId $SessionId `
+            $r = Invoke-SshCommand `
+                -SshClient $SshClient `
                 -Command   "sudo groupadd '$groupName'" `
                 -ErrorAction Stop
 

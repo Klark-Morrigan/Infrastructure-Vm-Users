@@ -59,7 +59,8 @@ Joins them by `vmName`, then for each reachable VM reconciles:
   automatically via `/etc/sudoers.d/90-cloud-init-users`).
 - An internet connection on first run (PSGallery is used to install
   `Infrastructure.Common`, `Infrastructure.Secrets`, and `Posh-SSH`
-  automatically).
+  automatically). Posh-SSH is used as the carrier for its bundled
+  SSH.NET library; its own cmdlets are not used directly.
 
 ---
 

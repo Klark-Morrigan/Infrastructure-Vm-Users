@@ -20,7 +20,7 @@ function Invoke-UserReconciliation {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [int] $SessionId,
+        [object] $SshClient,
 
         [Parameter(Mandatory)]
         [string] $VmName,
@@ -48,8 +48,8 @@ function Invoke-UserReconciliation {
     $hasPassword = $userMembers -contains 'password'
 
     # 'id' exits 0 if the user exists, non-zero otherwise.
-    $idResult = Invoke-SSHCommand `
-        -SessionId $SessionId `
+    $idResult = Invoke-SshCommand `
+        -SshClient $SshClient `
         -Command   "id '$username'" `
         -ErrorAction Stop
 
@@ -70,8 +70,8 @@ function Invoke-UserReconciliation {
         # On Linux the convention is to name the primary group after the user.
         $primaryGroupName = $username
 
-        $primaryGroupResult = Invoke-SSHCommand `
-            -SessionId $SessionId `
+        $primaryGroupResult = Invoke-SshCommand `
+            -SshClient $SshClient `
             -Command   "getent group '$primaryGroupName'" `
             -ErrorAction Stop
 
@@ -86,8 +86,8 @@ function Invoke-UserReconciliation {
         }
         $cmd += " '$username'"
 
-        $r = Invoke-SSHCommand `
-            -SessionId $SessionId `
+        $r = Invoke-SshCommand `
+            -SshClient $SshClient `
             -Command   $cmd `
             -ErrorAction Stop
 
@@ -105,8 +105,8 @@ function Invoke-UserReconciliation {
         # getent passwd is preferred over parsing /etc/passwd because it also
         # handles LDAP/NIS accounts. Read the full entry in one SSH round
         # trip so both shell (field 7) and homeDir (field 6) can be checked.
-        $passwdResult = Invoke-SSHCommand `
-            -SessionId $SessionId `
+        $passwdResult = Invoke-SshCommand `
+            -SshClient $SshClient `
             -Command   "getent passwd '$username'" `
             -ErrorAction Stop
 
@@ -120,8 +120,8 @@ function Invoke-UserReconciliation {
         # id -Gn returns all groups including the primary group (same name as
         # username on Ubuntu). Strip it to isolate supplementary groups, then
         # sort for a stable string comparison.
-        $gnResult = Invoke-SSHCommand `
-            -SessionId $SessionId `
+        $gnResult = Invoke-SshCommand `
+            -SshClient $SshClient `
             -Command   "id -Gn '$username'" `
             -ErrorAction Stop
 
@@ -153,8 +153,8 @@ function Invoke-UserReconciliation {
             $groupArg  = $groups -join ','
             $updateCmd = "sudo usermod -s '$shell' -G '$groupArg' '$username'"
 
-            $r = Invoke-SSHCommand `
-                -SessionId $SessionId `
+            $r = Invoke-SshCommand `
+                -SshClient $SshClient `
                 -Command   $updateCmd `
                 -ErrorAction Stop
 
@@ -193,8 +193,8 @@ function Invoke-UserReconciliation {
     # vmName and username are safe to log.
     # -----------------------------------------------------------------------
     if ($hasPassword) {
-        $r = Invoke-SSHCommand `
-            -SessionId $SessionId `
+        $r = Invoke-SshCommand `
+            -SshClient $SshClient `
             -Command   "echo '${username}:$($User.password)' | sudo chpasswd" `
             -ErrorAction Stop
 
