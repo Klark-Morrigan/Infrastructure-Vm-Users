@@ -144,14 +144,14 @@ foreach ($t in $targets) {
     $name = $t.Entry.vmName
     $ip   = $t.Provisioner.ipAddress
 
-    Write-Host "[$name] Pinging $ip ..." -ForegroundColor Cyan
+    Write-Host "[$name] Pinging ..." -ForegroundColor Cyan
 
     if (Test-Connection -ComputerName $ip -Count 1 -Quiet) {
         Write-Host "[$name] Reachable." -ForegroundColor Green
         $reachable.Add($t)
     }
     else {
-        Write-Warning "[$name] Unreachable at $ip - skipping."
+        Write-Warning "[$name] Unreachable - skipping."
     }
 }
 
@@ -181,7 +181,7 @@ foreach ($t in $reachable) {
     $prov  = $t.Provisioner
 
     Write-Host ""
-    Write-Host "[$name] Connecting to $($prov.ipAddress) as '$($prov.username)' ..." `
+    Write-Host "[$name] Connecting as '$($prov.username)' ..." `
         -ForegroundColor Cyan
 
     # $sshClient is declared before the try so the finally block can always
