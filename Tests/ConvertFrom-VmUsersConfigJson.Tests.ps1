@@ -1,12 +1,13 @@
 BeforeAll {
-    # Stub Assert-RequiredProperties before dot-sourcing common.ps1 so the
-    # function exists when common.ps1 is loaded. The real implementation lives
-    # in Infrastructure.Common, which is not required in the test environment.
+    # Stub Assert-RequiredProperties before dot-sourcing so the function exists
+    # when ConvertFrom-VmUsersConfigJson.ps1 is loaded. The real implementation
+    # lives in Infrastructure.Common, which is not required in the test
+    # environment.
     function Assert-RequiredProperties {
         param($Object, $Properties, $Context)
     }
 
-    . "$PSScriptRoot\..\hyper-v\ubuntu\common.ps1"
+    . "$PSScriptRoot\..\hyper-v\ubuntu\reconcile\ConvertFrom-VmUsersConfigJson.ps1"
 
     # Builds a minimal valid VM entry with all required fields populated.
     # Individual tests override specific fields as needed.
