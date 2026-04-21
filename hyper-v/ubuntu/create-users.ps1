@@ -196,6 +196,9 @@ foreach ($t in $reachable) {
         # HostKeyReceived handler). This is equivalent to Posh-SSH's
         # -AcceptKey and is acceptable on a private Hyper-V network with
         # statically provisioned IPs. Do NOT use on untrusted networks.
+        # PasswordAuthenticationMethod requires a plain string. Vm passwords
+        # originate as JSON field values (ConvertFrom-Json -> [string]);
+        # converting to SecureString would only require converting back here.
         $auth      = [Renci.SshNet.PasswordAuthenticationMethod]::new(
                          $prov.username, $prov.password)
         $connInfo  = [Renci.SshNet.ConnectionInfo]::new(

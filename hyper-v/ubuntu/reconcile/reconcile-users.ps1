@@ -192,6 +192,9 @@ function Invoke-UserReconciliation {
     # command's argument list (visible in ps aux on the remote host).
     # It must not appear in console output or error messages - only
     # vmName and username are safe to log.
+    # Password is a plain string - chpasswd requires it. Passwords
+    # originate as JSON field values (ConvertFrom-Json -> [string]);
+    # converting to SecureString would only require converting back here.
     # -----------------------------------------------------------------------
     if ($hasPassword) {
         $r = Invoke-SshClientCommand `
