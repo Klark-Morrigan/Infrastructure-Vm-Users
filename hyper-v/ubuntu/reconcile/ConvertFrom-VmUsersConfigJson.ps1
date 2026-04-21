@@ -1,11 +1,8 @@
 <#
-.SYNOPSIS
-    Shared helpers dot-sourced by setup-secrets.ps1 and create-users.ps1.
-
 .NOTES
-    Do not run this file directly. It is intended to be dot-sourced:
-        . "$PSScriptRoot\common.ps1"
-    Infrastructure.Common must be imported before dot-sourcing this file.
+    Do not run this file directly. It is intended to be dot-sourced by
+    setup-secrets.ps1 and create-users.ps1 after Infrastructure.Common
+    is loaded.
 #>
 
 # ---------------------------------------------------------------------------

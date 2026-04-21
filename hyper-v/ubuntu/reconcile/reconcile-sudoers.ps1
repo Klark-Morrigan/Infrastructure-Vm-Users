@@ -1,7 +1,8 @@
 <#
 .NOTES
     Do not run this file directly. It is intended to be dot-sourced by
-    create-users.ps1 after Infrastructure.Common and common.ps1 are loaded.
+    create-users.ps1 after Infrastructure.Common and
+#    ConvertFrom-VmUsersConfigJson.ps1 are loaded.
 #>
 
 # ---------------------------------------------------------------------------
