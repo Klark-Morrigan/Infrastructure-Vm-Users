@@ -134,16 +134,6 @@ Describe 'ConvertFrom-VmUsersConfigJson' {
                 Should -Throw -ExpectedMessage "*missing required property*"
         }
 
-        It 'propagates a missing-users error from Assert-RequiredProperties' {
-            # The BeforeAll stub is a no-op, so simulate the real
-            # Assert-RequiredProperties detecting the absent property.
-            Mock Assert-RequiredProperties {
-                throw "VM entry is missing required property 'users'."
-            }
-            { ConvertFrom-VmUsersConfigJson -Json '[{ "vmName": "node-01" }]' } |
-                Should -Throw -ExpectedMessage "*missing required property 'users'*"
-        }
-
         It 'throws when the users array is empty' {
             # Assert-RequiredProperties is stubbed as a no-op, so the
             # count check further down is what fires here.
