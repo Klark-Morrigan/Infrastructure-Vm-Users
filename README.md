@@ -99,12 +99,10 @@ provisioner config by `vmName`.
     // Useful for documenting intent and ensuring groups are created even if
     // no users in this config are members (e.g. a shared directory group
     // managed by Infrastructure-GitHubRunners). Supports optional gid pinning
-    // and description - see fields table below.
+    // - see fields table below.
     "groups": [
       {
-        "groupName":   "u-actions-runner",
-        // Optional. Informational; stored in /etc/gshadow via gpasswd -c.
-        "description": "Primary group for the actions runner service account."
+        "groupName": "u-actions-runner"
       }
     ],
     "users": [
@@ -181,7 +179,6 @@ provisioner config by `vmName`.
 | `groups` | Array of group declarations to ensure exist before users are processed |
 | `groups[].groupName` | Group name (required within each group entry) |
 | `groups[].gid` | Pin the GID - useful for NFS / Docker bind mounts; mismatch is an error |
-| `groups[].description` | Informational comment stored in `/etc/gshadow` via `gpasswd -c`; not read back during reconciliation |
 | `users[].password` | OS password - always written via `chpasswd`; canonical source for consuming repos |
 
 ---
