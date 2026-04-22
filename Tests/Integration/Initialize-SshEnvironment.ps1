@@ -1,8 +1,8 @@
 # ---------------------------------------------------------------------------
-# _TestSetup.ps1
+# Initialize-SshEnvironment.ps1
 #   Shared BeforeAll body for integration tests. Dot-source this file
 #   inside a BeforeAll block:
-#       BeforeAll { . "$PSScriptRoot\_TestSetup.ps1" }
+#       BeforeAll { . "$PSScriptRoot\Initialize-SshEnvironment.ps1" }
 #
 #   When dot-sourced inside BeforeAll, all code runs in that block's scope,
 #   so $Script:* assignments land on the test file's script scope and are

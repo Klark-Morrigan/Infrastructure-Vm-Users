@@ -1,19 +1,14 @@
 # Integration tests for Invoke-UserReconciliation against a real Linux SSH
-# session. See _TestSetup.ps1 for environment details and isolation notes.
+# session. See Initialize-SshEnvironment.ps1 for environment details and isolation notes.
 
 BeforeAll {
-    . "$PSScriptRoot\_TestSetup.ps1"
+    . "$PSScriptRoot\Initialize-SshEnvironment.ps1"
 }
 
 AfterAll {
-    if ($null -ne $Script:SshClient) {
-        if ($Script:SshClient.IsConnected) { $Script:SshClient.Disconnect() }
-        $Script:SshClient.Dispose()
-    }
-
     & bash -c 'userdel -r infra-t-user 2>/dev/null; groupdel infra-t-group 2>/dev/null' |
         Out-Null
-    & bash -c "userdel -r ${Script:AdminUser} 2>/dev/null" | Out-Null
+    . "$PSScriptRoot\Remove-SshEnvironment.ps1"
 }
 
 Describe 'Invoke-UserReconciliation' {
