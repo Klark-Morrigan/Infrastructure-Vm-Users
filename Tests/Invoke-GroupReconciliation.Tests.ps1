@@ -70,29 +70,18 @@ Describe 'Invoke-GroupReconciliation' {
                 Should -Throw -ExpectedMessage '*groupadd failed*'
         }
 
-        It 'sets the description via gpasswd -c when description is declared' {
+        It 'emits a warning and does not call gpasswd when description is declared' {
             $group = [PSCustomObject]@{ groupName = 'docker'; description = 'Container runtime' }
             Mock Invoke-SshClientCommand {
-                if ($Command -like 'getent*')   { New-SshResult 1 }
-                else                            { New-SshResult 0 }
+                if ($Command -like 'getent*') { New-SshResult 1 }
+                else                          { New-SshResult 0 }
             }
             Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
-                -DeclaredGroups @($group) -Users @()
-            Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
-                $Command -like "*gpasswd -c*Container runtime*docker*"
+                -DeclaredGroups @($group) -Users @() `
+                3>&1 | Should -Match 'description.*ignored'
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
+                $Command -like '*gpasswd*'
             }
-        }
-
-        It 'throws when gpasswd -c fails' {
-            $group = [PSCustomObject]@{ groupName = 'docker'; description = 'Container runtime' }
-            Mock Invoke-SshClientCommand {
-                if ($Command -like 'getent*')         { New-SshResult 1 }
-                elseif ($Command -like '*groupadd*')  { New-SshResult 0 }
-                else                                  { New-SshResult 1 @() 'permission denied' }
-            }
-            { Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
-                -DeclaredGroups @($group) -Users @() } |
-                Should -Throw -ExpectedMessage '*gpasswd -c failed*'
         }
     }
 
@@ -123,20 +112,6 @@ Describe 'Invoke-GroupReconciliation' {
                 Should -Throw -ExpectedMessage '*GID*'
         }
 
-        It 'does not set description when the group already exists' {
-            # KNOWN BEHAVIOUR: gpasswd -c is only called during group creation.
-            # If the group is already present on the host, its description in
-            # /etc/gshadow is not reconciled. A pre-existing group that has a
-            # different (or no) description will not be updated.
-            # To change the description of an existing group, run gpasswd -c manually.
-            $group = [PSCustomObject]@{ groupName = 'docker'; description = 'Container runtime' }
-            Mock Invoke-SshClientCommand { New-SshResult 0 @('docker:x:999:') }
-            Invoke-GroupReconciliation -SshClient ([PSCustomObject]@{}) -VmName 'node-01' `
-                -DeclaredGroups @($group) -Users @()
-            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
-                $Command -like '*gpasswd*'
-            }
-        }
     }
 
     # ------------------------------------------------------------------

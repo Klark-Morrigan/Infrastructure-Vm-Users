@@ -61,9 +61,7 @@ VMs by `vmName`:
     // (e.g. a shared directory group managed by Infrastructure-GitHubRunners).
     "groups": [
       {
-        "groupName":   "u-actions-runner",
-        // Optional. Informational; written to /etc/gshadow via gpasswd.
-        "description": "Primary group for the actions runner service account."
+        "groupName": "u-actions-runner"
       }
     ],
     "users": [
