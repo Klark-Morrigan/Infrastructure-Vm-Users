@@ -134,8 +134,6 @@ provisioner config by `vmName`.
         // into /home/u-actions-runner/runners/ when that directory is set
         // g+rwx by Infrastructure-GitHubRunners. u-actions-runner owns the
         // directory via its primary group - no extra group entry needed there.
-        // Broad sudo rules for mkdir/tar are avoided: wildcard paths make
-        // them exploitable via path manipulation.
         "groups":   ["u-actions-runner"],
         // Optional. When present, written via chpasswd on every run.
         // Comparison against an existing hash is impossible, so overwriting
@@ -146,12 +144,25 @@ provisioner config by `vmName`.
         "password": "...",
         // Scoped to exactly the operations Infrastructure-GitHubRunners
         // requires. SSH password auth is the only gate - once authenticated,
-        // there is no further challenge before sudo. These four rules bound
-        // the blast radius: even if u-runner-deploy credentials are
-        // compromised, the attacker cannot escalate beyond them.
+        // there is no further challenge before sudo. These rules bound the
+        // blast radius: even if u-runner-deploy credentials are compromised,
+        // the attacker cannot escalate beyond u-actions-runner or the
+        // runner service lifecycle.
+        //
+        // Rules 1-5: act as u-actions-runner to manage files under its home.
+        //   mkdir/rm/curl/tar are scoped by binary only - sudoers cannot
+        //   restrict by path argument without enabling bypass via symlinks.
+        //   The constraint is that the attacker is bounded to whatever
+        //   u-actions-runner itself can write.
+        // Rule 6: svc.sh runs as root (required by the install step).
+        // Rules 7-8: systemctl lifecycle for the runner service.
         "sudoersRules": [
+          "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /usr/bin/mkdir",
+          "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /usr/bin/rm",
+          "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /usr/bin/curl",
+          "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /usr/bin/tar",
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /home/u-actions-runner/runners/*/config.sh",
-          "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /home/u-actions-runner/runners/*/svc.sh",
+          "u-runner-deploy ALL=(root) NOPASSWD: /home/u-actions-runner/runners/*/svc.sh",
           "u-runner-deploy ALL=(root) NOPASSWD: /bin/systemctl start actions.runner.*",
           "u-runner-deploy ALL=(root) NOPASSWD: /bin/systemctl is-active actions.runner.*"
         ]

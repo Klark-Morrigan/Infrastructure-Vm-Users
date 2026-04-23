@@ -239,6 +239,11 @@ foreach ($t in $reachable) {
     catch [Renci.SshNet.Common.SshConnectionException] {
         Write-Error "[$name] SSH connection failed: $($_.Exception.Message)"
     }
+    catch [System.Net.Sockets.SocketException] {
+        # "Connection refused" - SSH is not listening on port 22.
+        # The VM is up (ping passed) but sshd may not have started yet.
+        Write-Error "[$name] SSH port refused: $($_.Exception.Message)"
+    }
     finally {
         # Always release the TCP connection, even if Connect() or an
         # operation above threw.
