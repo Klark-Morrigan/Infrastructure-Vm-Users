@@ -72,6 +72,20 @@ Describe 'Invoke-VmUserCreate' {
             $Script:_capturedDeclaredGroups          | Should -HaveCount 1
             $Script:_capturedDeclaredGroups[0].groupName | Should -Be 'docker'
         }
+
+        It 'passes the full users list to Invoke-GroupReconciliation' {
+            $Script:_capturedUsers = $null
+            Mock Invoke-GroupReconciliation   { $Script:_capturedUsers = $Users }
+            Mock Invoke-UserReconciliation    {}
+            Mock Invoke-SudoersReconciliation {}
+
+            Invoke-VmUserCreate -SshClient $Script:FakeSsh -VmName 'node-01' `
+                -Entry (New-Entry @('u-deploy', 'u-runner'))
+
+            $Script:_capturedUsers           | Should -HaveCount 2
+            $Script:_capturedUsers[0].username | Should -Be 'u-deploy'
+            $Script:_capturedUsers[1].username | Should -Be 'u-runner'
+        }
     }
 
     Context 'per-user reconciliation' {
