@@ -11,6 +11,31 @@ BeforeAll {
     . ([IO.Path]::Combine($src, 'down', 'Remove-VmSudoers.ps1'))
     . ([IO.Path]::Combine($src, 'down', 'Remove-VmUsers.ps1'))
     . ([IO.Path]::Combine($src, 'down', 'Invoke-VmUserRemove.ps1'))
+
+    # Helper: build a minimal entry object matching VmUsersConfig structure.
+    # $Groups is the optional 'groups' array (declared groups); omit to leave
+    # the property absent so Invoke-VmUserRemove exercises the no-groups branch.
+    # Must be inside BeforeAll - Pester 5 It blocks cannot see script-scope
+    # functions defined outside BeforeAll.
+    function New-Entry {
+        param(
+            [string[]] $Usernames,
+            [object[]] $Groups = $null
+        )
+        $users = $Usernames | ForEach-Object {
+            [PSCustomObject] @{
+                username = $_
+                shell    = '/bin/bash'
+                homeDir  = "/home/$_"
+            }
+        }
+        $entry = [PSCustomObject] @{ vmName = $Script:VmName; users = $users }
+        if ($null -ne $Groups) {
+            Add-Member -InputObject $entry -MemberType NoteProperty `
+                -Name 'groups' -Value $Groups
+        }
+        $entry
+    }
 }
 
 AfterAll {
@@ -20,29 +45,6 @@ userdel -r infra-t-user2 2>/dev/null
 groupdel  infra-t-group  2>/dev/null
 '@  | Out-Null
     . "$PSScriptRoot\Remove-SshEnvironment.ps1"
-}
-
-# Helper: build a minimal entry object matching VmUsersConfig structure.
-# $Groups is the optional 'groups' array (declared groups); omit to leave
-# the property absent so Invoke-VmUserRemove exercises the no-groups branch.
-function New-Entry {
-    param(
-        [string[]] $Usernames,
-        [object[]] $Groups = $null
-    )
-    $users = $Usernames | ForEach-Object {
-        [PSCustomObject] @{
-            username = $_
-            shell    = '/bin/bash'
-            homeDir  = "/home/$_"
-        }
-    }
-    $entry = [PSCustomObject] @{ vmName = $Script:VmName; users = $users }
-    if ($null -ne $Groups) {
-        Add-Member -InputObject $entry -MemberType NoteProperty `
-            -Name 'groups' -Value $Groups
-    }
-    $entry
 }
 
 Describe 'Invoke-VmUserRemove' {
@@ -192,7 +194,7 @@ usermod -aG infra-t-group infra-t-user2
             -WarningVariable warnings
 
         # Group must still exist - it was not force-deleted.
-        Invoke-SshQuery 'getent group infra-t-group 2>/dev/null && echo exists || echo absent' |
+        Invoke-SshQuery 'getent group infra-t-group >/dev/null 2>&1 && echo exists || echo absent' |
             Should -Be 'exists'
         $warnings | Should -Match 'still has members'
     }

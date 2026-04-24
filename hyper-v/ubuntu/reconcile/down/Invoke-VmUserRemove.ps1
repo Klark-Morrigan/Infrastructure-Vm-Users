@@ -34,13 +34,11 @@ function Invoke-VmUserRemove {
     $users = @($Entry.users)
 
     # Get-Member guards the optional 'groups' property without triggering
-    # StrictMode on a missing key.
+    # StrictMode on a missing key. @(...) collects the if-expression output
+    # into an array; when 'groups' is absent nothing is emitted and the
+    # result is @() rather than $null.
     $entryMembers   = (Get-Member -InputObject $Entry -MemberType NoteProperty).Name
-    $declaredGroups = if ($entryMembers -contains 'groups') {
-        @($Entry.groups)
-    } else {
-        @()
-    }
+    $declaredGroups = @(if ($entryMembers -contains 'groups') { $Entry.groups })
 
     foreach ($user in $users) {
         Write-Host "[$VmName] Removing user '$($user.username)' ..." -ForegroundColor Cyan
