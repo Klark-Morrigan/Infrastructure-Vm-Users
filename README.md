@@ -253,7 +253,7 @@ Infrastructure-Vm-Users/
 |     `- reconcile/
 |        |- common/          # Shared between create and remove
 |        |- up/              # User creation and reconciliation
-|        `- down/            # User removal (see docs/dev/implementation/02 - user removal)
+|        `- down/            # User removal
 |- Tests/
 |  |- reconcile/
 |  |  |- common/             # Unit tests for reconcile/common
