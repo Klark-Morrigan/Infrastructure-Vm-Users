@@ -58,7 +58,10 @@ Describe 'Invoke-VmUserCreate' {
         }
 
         It 'passes declared groups when the entry has a groups property' {
-            Mock Invoke-GroupReconciliation   {}
+            # ParameterFilter variable binding for arrays is unreliable in
+            # Pester 5 - capture via the mock body instead.
+            $Script:_capturedDeclaredGroups = $null
+            Mock Invoke-GroupReconciliation   { $Script:_capturedDeclaredGroups = $DeclaredGroups }
             Mock Invoke-UserReconciliation    {}
             Mock Invoke-SudoersReconciliation {}
 
@@ -66,9 +69,8 @@ Describe 'Invoke-VmUserCreate' {
             Invoke-VmUserCreate -SshClient $Script:FakeSsh -VmName 'node-01' `
                 -Entry (New-Entry -Groups $groups)
 
-            Should -Invoke Invoke-GroupReconciliation -Times 1 -ParameterFilter {
-                $DeclaredGroups.Count -eq 1
-            }
+            $Script:_capturedDeclaredGroups          | Should -HaveCount 1
+            $Script:_capturedDeclaredGroups[0].groupName | Should -Be 'docker'
         }
     }
 
