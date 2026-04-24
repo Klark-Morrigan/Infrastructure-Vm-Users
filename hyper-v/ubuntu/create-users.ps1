@@ -177,9 +177,8 @@ Write-Host "$($reachable.Count) of $($targets.Count) matched VM(s) reachable." `
 # ---------------------------------------------------------------------------
 
 foreach ($t in $reachable) {
-    $name  = $t.Entry.vmName
-    $users = @($t.Entry.users)
-    $prov  = $t.Provisioner
+    $name = $t.Entry.vmName
+    $prov = $t.Provisioner
 
     Write-Host ""
     Write-Host "[$name] Connecting as '$($prov.username)' ..." `
@@ -197,7 +196,7 @@ foreach ($t in $reachable) {
         # HostKeyReceived handler). This is equivalent to Posh-SSH's
         # -AcceptKey and is acceptable on a private Hyper-V network with
         # statically provisioned IPs. Do NOT use on untrusted networks.
-        # PasswordAuthenticationMethod requires a plain string. Vm passwords
+        # PasswordAuthenticationMethod requires a plain string. VM passwords
         # originate as JSON field values (ConvertFrom-Json -> [string]);
         # converting to SecureString would only require converting back here.
         $auth      = [Renci.SshNet.PasswordAuthenticationMethod]::new(
@@ -207,35 +206,10 @@ foreach ($t in $reachable) {
         $sshClient = [Renci.SshNet.SshClient]::new($connInfo)
         $sshClient.Connect()
 
-        # Get-Member is used to check for the optional 'groups' property
-        # without triggering StrictMode on a missing key.
-        $entryMembers   = (Get-Member -InputObject $t.Entry -MemberType NoteProperty).Name
-        $declaredGroups = if ($entryMembers -contains 'groups') {
-            @($t.Entry.groups)
-        } else {
-            @()
-        }
-
-        # 5a. Groups must exist before users reference them in useradd/usermod.
-        Invoke-GroupReconciliation `
-            -SshClient      $sshClient `
-            -VmName         $name `
-            -DeclaredGroups $declaredGroups `
-            -Users          $users
-
-        foreach ($user in $users) {
-            # 5b. Ensure the user exists with the correct shell and groups.
-            Invoke-UserReconciliation `
-                -SshClient $sshClient `
-                -VmName    $name `
-                -User      $user
-
-            # 5c. Ensure the sudoers file matches desired rules.
-            Invoke-SudoersReconciliation `
-                -SshClient $sshClient `
-                -VmName    $name `
-                -User      $user
-        }
+        Invoke-VmUserCreate `
+            -SshClient $sshClient `
+            -VmName    $name `
+            -Entry     $t.Entry
     }
     catch [Renci.SshNet.Common.SshConnectionException] {
         Write-Error "[$name] SSH connection failed: $($_.Exception.Message)"
