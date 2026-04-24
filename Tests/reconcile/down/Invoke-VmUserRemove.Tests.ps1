@@ -61,7 +61,9 @@ Describe 'Invoke-VmUserRemove' {
             Invoke-VmUserRemove -SshClient $Script:FakeSsh -VmName 'node-01' `
                 -Entry (New-Entry)
 
-            $Script:_capturedGroups | Should -HaveCount 0
+            # Pester 5 binds an empty array as $null in mock script blocks,
+            # so BeNullOrEmpty covers both @() and $null correctly.
+            $Script:_capturedGroups | Should -BeNullOrEmpty
         }
 
         It 'passes declared groups to Remove-VmGroups' {
