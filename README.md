@@ -292,7 +292,8 @@ Infrastructure-Vm-Users/
 |  |  |- common/             # Unit tests for reconcile/common
 |  |  |- up/                 # Unit tests for reconcile/up
 |  |  `- down/               # Unit tests for reconcile/down
-|  `- Integration/           # Integration tests (require a live SSH target via Docker)
+|  `- Integration/           # Integration tests - one shared SSH session for all reconciliation
+|     `- Reconcile.Tests.ps1 # All integration tests (groups, users, sudoers, removal)
 |- docs/
 |  `- dev/
 |     `- implementation/
