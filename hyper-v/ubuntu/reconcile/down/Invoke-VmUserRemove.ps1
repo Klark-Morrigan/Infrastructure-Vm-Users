@@ -1,25 +1,23 @@
 <#
 .NOTES
     Do not run this file directly. It is intended to be dot-sourced by
-    create-users.ps1 after Infrastructure.Common is loaded.
+    remove-users.ps1 after Infrastructure.Common is loaded.
 #>
 
 # ---------------------------------------------------------------------------
-# Invoke-VmUserCreate
-#   Reconciles all groups, users, and sudoers rules for a single VM over an
-#   existing SSH connection. Called once per reachable VM by create-users.ps1.
-#   The caller owns the SSH connection lifecycle.
+# Invoke-VmUserRemove
+#   Removes all users, their sudoers files, and declared groups for a single
+#   VM over an existing SSH connection. Called once per reachable VM by
+#   remove-users.ps1. The caller owns the SSH connection lifecycle.
 #
 #   Sequence:
-#     1. Invoke-GroupReconciliation  - declared and implicit groups.
-#     2. Invoke-UserReconciliation   - per user: create or update.
-#     3. Invoke-SudoersReconciliation - per user: write or remove rules.
-#
-#   Groups are reconciled once per VM before users because useradd/usermod
-#   fail when a referenced group does not yet exist.
+#     1. Remove-VmSudoers  - per user: revoke elevated access first.
+#     2. Remove-VmUsers    - per user: delete account and home directory.
+#     3. Remove-VmGroups   - once per VM: delete declared groups after all
+#                            users are gone so groupdel finds no members.
 # ---------------------------------------------------------------------------
 
-function Invoke-VmUserCreate {
+function Invoke-VmUserRemove {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -42,24 +40,26 @@ function Invoke-VmUserCreate {
     $entryMembers   = (Get-Member -InputObject $Entry -MemberType NoteProperty).Name
     $declaredGroups = @(if ($entryMembers -contains 'groups') { $Entry.groups })
 
-    # Step 1: groups must exist before users reference them in useradd/usermod.
-    Invoke-GroupReconciliation `
-        -SshClient      $SshClient `
-        -VmName         $VmName `
-        -DeclaredGroups $declaredGroups `
-        -Users          $users
-
     foreach ($user in $users) {
-        # Step 2: ensure the user exists with the correct shell and groups.
-        Invoke-UserReconciliation `
+        Write-Host "[$VmName] Removing user '$($user.username)' ..." -ForegroundColor Cyan
+
+        # Step 1: revoke sudo access before the account is deleted.
+        Remove-VmSudoers `
             -SshClient $SshClient `
             -VmName    $VmName `
             -User      $user
 
-        # Step 3: ensure the sudoers file matches the desired rules.
-        Invoke-SudoersReconciliation `
+        # Step 2: delete the account and home directory.
+        Remove-VmUsers `
             -SshClient $SshClient `
             -VmName    $VmName `
             -User      $user
     }
+
+    # Step 3: remove declared groups after all users are gone. Implicit groups
+    # (named after the username) were already removed by userdel in step 2.
+    Remove-VmGroups `
+        -SshClient      $SshClient `
+        -VmName         $VmName `
+        -DeclaredGroups $declaredGroups
 }

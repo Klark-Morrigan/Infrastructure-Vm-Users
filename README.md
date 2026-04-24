@@ -1,7 +1,7 @@
 # Infrastructure-Vm-Users
 
-Reconciles OS users on Ubuntu Hyper-V VMs against a desired state stored in
-a local encrypted vault.
+Reconciles and removes OS users on Ubuntu Hyper-V VMs against a desired
+state stored in a local encrypted vault.
 
 ## Index
 
@@ -11,6 +11,7 @@ a local encrypted vault.
 - [Quick start](#quick-start)
 - [Config reference](#config-reference)
 - [Reconciliation behaviour](#reconciliation-behaviour)
+- [Removal](#removal)
 - [CI](#ci)
 - [Repo structure](#repo-structure)
 
@@ -39,8 +40,8 @@ Joins them by `vmName`, then for each reachable VM reconciles:
 ## What it does not do
 
 - Provision VMs - use [Infrastructure-Vm-Provisioner] for that.
-- Delete users - removal must be done manually to prevent accidental data
-  loss.
+- Delete users automatically on config removal - use `remove-users.ps1`
+  explicitly when you intend to remove accounts (see [Removal](#removal)).
 - Move home directories - if `homeDir` changes in config, the directory on
   disk is not relocated (a manual step to avoid data loss).
 - Manage SSH keys or PAM configuration.
@@ -82,6 +83,16 @@ Re-running safely updates the stored config.
 
 The script is idempotent - re-running it produces the same result and emits
 `ok` for everything already in the desired state.
+
+### 3. Remove users
+
+```powershell
+.\hyper-v\ubuntu\remove-users.ps1
+```
+
+Reads the same `VmUsersConfig` used by `create-users.ps1` and removes every
+declared user, their sudoers file, and declared groups from each reachable VM.
+See [Removal](#removal) for the sequence and safety guarantees.
 
 ---
 
@@ -224,6 +235,27 @@ provisioner config by `vmName`.
 
 ---
 
+## Removal
+
+`remove-users.ps1` is safe to re-run at any time. It reads the same
+`VmUsersConfig` as `create-users.ps1` and removes every declared user and
+group from each reachable VM. On each run:
+
+1. VMs missing from `VmProvisionerConfig` are warned and skipped.
+2. VMs that do not respond to ping are warned and skipped.
+3. For each reachable VM, one SSH session is opened. For each declared user:
+   1. **Sudoers removal** - `/etc/sudoers.d/{username}` is deleted if it
+      exists. Absence is not an error.
+   2. **User removal** - `userdel -r` deletes the account and home directory.
+      The implicit primary group (named after the user) is removed
+      automatically by `userdel`. Absence is not an error.
+4. **Group removal** - declared groups are deleted after all users are gone
+   so `groupdel` finds no members. If a group still has members (e.g. a
+   user not in this config joined it), the group is warned and skipped rather
+   than forcing deletion.
+
+---
+
 ## CI
 
 CI runs on pull requests targeting `master` via `.github/workflows/ci.yml`,
@@ -249,17 +281,19 @@ Infrastructure-Vm-Users/
 |- hyper-v/
 |  `- ubuntu/
 |     |- create-users.ps1    # Entry point - reconciles groups, users, and sudoers
+|     |- remove-users.ps1    # Entry point - removes users, sudoers, and groups
 |     |- setup-secrets.ps1   # One-time vault setup
 |     `- reconcile/
 |        |- common/          # Shared between create and remove
 |        |- up/              # User creation and reconciliation
-|        `- down/            # User removal (see docs/dev/implementation/02 - user removal)
+|        `- down/            # User removal
 |- Tests/
 |  |- reconcile/
 |  |  |- common/             # Unit tests for reconcile/common
 |  |  |- up/                 # Unit tests for reconcile/up
 |  |  `- down/               # Unit tests for reconcile/down
-|  `- Integration/           # Integration tests (require a live SSH target via Docker)
+|  `- Integration/           # Integration tests - one shared SSH session for all reconciliation
+|     `- Reconcile.Tests.ps1 # All integration tests (groups, users, sudoers, removal)
 |- docs/
 |  `- dev/
 |     `- implementation/
