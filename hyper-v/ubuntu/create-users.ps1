@@ -38,10 +38,11 @@ Import-Module Infrastructure.Common -Force -ErrorAction Stop
 
 # Dot-source helpers after Infrastructure.Common is loaded so
 # Assert-RequiredProperties is available inside their function bodies.
-. "$PSScriptRoot\reconcile\ConvertFrom-VmUsersConfigJson.ps1"
-. "$PSScriptRoot\reconcile\reconcile-groups.ps1"
-. "$PSScriptRoot\reconcile\reconcile-users.ps1"
-. "$PSScriptRoot\reconcile\reconcile-sudoers.ps1"
+. "$PSScriptRoot\reconcile\common\ConvertFrom-VmUsersConfigJson.ps1"
+. "$PSScriptRoot\reconcile\up\Invoke-GroupReconciliation.ps1"
+. "$PSScriptRoot\reconcile\up\Invoke-SudoersReconciliation.ps1"
+. "$PSScriptRoot\reconcile\up\Invoke-UserReconciliation.ps1"
+. "$PSScriptRoot\reconcile\up\Invoke-VmUserCreate.ps1"
 
 # Infrastructure.Secrets must already be installed by setup-secrets.ps1.
 Import-Module Infrastructure.Secrets                    -ErrorAction Stop

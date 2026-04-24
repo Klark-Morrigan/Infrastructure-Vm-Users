@@ -245,23 +245,27 @@ No additional CI configuration is needed in this repo.
 Infrastructure-Vm-Users/
 |- .github/
 |  `- workflows/
-|     `- ci.yml                  # Delegates to shared ci-powershell.yml in Infrastructure-Common
+|     `- ci.yml              # Delegates to shared ci-powershell.yml in Infrastructure-Common
 |- hyper-v/
 |  `- ubuntu/
-|     |- create-users.ps1        # Entry point - reconciles groups, users, and sudoers
-|     |- setup-secrets.ps1       # One-time vault setup
-|     |- common.ps1              # Shared helpers (dot-sourced, not run directly)
-|     |- reconcile-groups.ps1    # Group reconciliation logic
-|     |- reconcile-users.ps1     # User reconciliation logic
-|     `- reconcile-sudoers.ps1   # Sudoers reconciliation logic
-|- Tests/               # Pester unit tests
+|     |- create-users.ps1    # Entry point - reconciles groups, users, and sudoers
+|     |- setup-secrets.ps1   # One-time vault setup
+|     `- reconcile/
+|        |- common/          # Shared between create and remove
+|        |- up/              # User creation and reconciliation
+|        `- down/            # User removal (see docs/dev/implementation/02 - user removal)
+|- Tests/
+|  |- reconcile/
+|  |  |- common/             # Unit tests for reconcile/common
+|  |  |- up/                 # Unit tests for reconcile/up
+|  |  `- down/               # Unit tests for reconcile/down
+|  `- Integration/           # Integration tests (require a live SSH target via Docker)
 |- docs/
 |  `- dev/
 |     `- implementation/
-|        `- 01 - initial implementation/
-|           |- problem.md
-|           `- plan.md
-|- Run-Tests.ps1     # Runs Pester tests (called by ci-powershell.yml)
+|        |- 01 - initial implementation/
+|        `- 02 - user removal/
+|- Run-Tests.ps1             # Runs Pester unit tests (called by ci-powershell.yml)
 `- README.md
 ```
 

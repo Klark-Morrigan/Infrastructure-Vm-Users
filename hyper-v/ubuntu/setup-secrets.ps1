@@ -65,7 +65,7 @@ Import-Module Infrastructure.Common -Force -ErrorAction Stop
 # ConvertFrom-VmUsersConfigJson.ps1 is dot-sourced after Infrastructure.Common
 # is loaded. It only calls Assert-RequiredProperties inside function bodies,
 # not at load time, so this ordering is safe.
-. "$PSScriptRoot\reconcile\ConvertFrom-VmUsersConfigJson.ps1"
+. "$PSScriptRoot\reconcile\common\ConvertFrom-VmUsersConfigJson.ps1"
 
 # The minimum version is pinned here - bump it when a newer feature is required.
 Invoke-ModuleInstall -ModuleName 'Infrastructure.Secrets' -MinimumVersion '2.1.0'
