@@ -151,19 +151,6 @@ account itself is deleted.
 **README**: Add `Remove-VmSudoers` to the repo structure under
 `reconcile/down/`.
 
-```mermaid
-graph TD
-    subgraph "reconcile/down"
-        RVS[Remove-VmSudoers]
-    end
-
-    subgraph "Infrastructure.Common"
-        SSH[Invoke-SshClientCommand]
-    end
-
-    RVS --> SSH
-```
-
 ---
 
 ### Step 3 - Remove-VmUsers
@@ -188,19 +175,6 @@ deleted while members exist).
 
 **README**: Add `Remove-VmUsers` to the repo structure under
 `reconcile/down/`.
-
-```mermaid
-graph TD
-    subgraph "reconcile/down"
-        RVU[Remove-VmUsers]
-    end
-
-    subgraph "Infrastructure.Common"
-        SSH[Invoke-SshClientCommand]
-    end
-
-    RVU --> SSH
-```
 
 ---
 
@@ -231,19 +205,6 @@ Implicit groups (named after the username) are already removed by
 
 **README**: Add `Remove-VmGroups` to the repo structure under
 `reconcile/down/`.
-
-```mermaid
-graph TD
-    subgraph "reconcile/down"
-        RVG[Remove-VmGroups]
-    end
-
-    subgraph "Infrastructure.Common"
-        SSH[Invoke-SshClientCommand]
-    end
-
-    RVG --> SSH
-```
 
 ---
 

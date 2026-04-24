@@ -137,10 +137,10 @@ Import-Module Posh-SSH
 Write-Step 5 'dot-sourcing reconciliation functions'
 
 $src = [IO.Path]::Combine($PSScriptRoot, '..', '..', 'hyper-v', 'ubuntu', 'reconcile')
-. ([IO.Path]::Combine($src, 'ConvertFrom-VmUsersConfigJson.ps1'))
-. ([IO.Path]::Combine($src, 'reconcile-groups.ps1'))
-. ([IO.Path]::Combine($src, 'reconcile-users.ps1'))
-. ([IO.Path]::Combine($src, 'reconcile-sudoers.ps1'))
+. ([IO.Path]::Combine($src, 'common', 'ConvertFrom-VmUsersConfigJson.ps1'))
+. ([IO.Path]::Combine($src, 'up',     'Invoke-GroupReconciliation.ps1'))
+. ([IO.Path]::Combine($src, 'up',     'Invoke-SudoersReconciliation.ps1'))
+. ([IO.Path]::Combine($src, 'up',     'Invoke-UserReconciliation.ps1'))
 
 # -----------------------------------------------------------------------
 # 6. Open SSH session to localhost via SSH.NET directly.
