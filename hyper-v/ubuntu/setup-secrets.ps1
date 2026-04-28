@@ -57,7 +57,7 @@ Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 `
     -Scope CurrentUser -Force -ForceBootstrap | Out-Null
 $_common = Get-Module -ListAvailable -Name Infrastructure.Common |
     Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'1.0.3') {
+if (-not $_common -or $_common.Version -lt [Version]'1.3.3') {
     Install-Module Infrastructure.Common -Scope CurrentUser -Force
 }
 Import-Module Infrastructure.Common -Force -ErrorAction Stop

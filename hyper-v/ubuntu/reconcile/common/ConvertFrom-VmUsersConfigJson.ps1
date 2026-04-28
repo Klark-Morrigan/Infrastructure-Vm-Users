@@ -32,9 +32,7 @@ function ConvertFrom-VmUsersConfigJson {
         throw "Invalid JSON: $_"
     }
 
-    # In PS 5.1, ConvertFrom-Json unwraps single-element JSON arrays into a
-    # bare PSCustomObject. @() normalises the result to an array in both cases.
-    $entries = @($parsed)
+    $entries = ConvertTo-Array $parsed
 
     if ($entries.Count -eq 0) {
         throw "Config must be a non-empty JSON array of VM user entries."
@@ -60,9 +58,7 @@ function ConvertFrom-VmUsersConfigJson {
         # StrictMode on a missing property.
         $entryMembers = (Get-Member -InputObject $entry -MemberType NoteProperty).Name
         if ($entryMembers -contains 'groups') {
-            # In PS 5.1 a single-element array in JSON is unwrapped to a bare
-            # object by ConvertFrom-Json. @() normalises to array.
-            $groups = @($entry.groups)
+            $groups = ConvertTo-Array $entry.groups
             foreach ($group in $groups) {
                 Assert-RequiredProperties `
                     -Object     $group `
@@ -71,8 +67,7 @@ function ConvertFrom-VmUsersConfigJson {
             }
         }
 
-        # @() normalises the PS 5.1 single-element unwrap (see groups above).
-        $users = @($entry.users)
+        $users = ConvertTo-Array $entry.users
 
         if ($users.Count -eq 0) {
             throw "VM entry '$($entry.vmName)' must have at least one user."
