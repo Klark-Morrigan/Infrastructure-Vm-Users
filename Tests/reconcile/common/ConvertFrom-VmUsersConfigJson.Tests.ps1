@@ -7,6 +7,14 @@ BeforeAll {
         param($Object, $Properties, $Context)
     }
 
+    # ConvertTo-Array is provided by Infrastructure.Common at runtime.
+    # Stub it here so the unit tests have no cross-repo dependency.
+    function ConvertTo-Array {
+        param([AllowNull()] $InputObject)
+        if ($null -eq $InputObject) { return , @() }
+        , @($InputObject)
+    }
+
     . "$PSScriptRoot\..\..\..\hyper-v\ubuntu\reconcile\common\ConvertFrom-VmUsersConfigJson.ps1"
 
     # Builds a minimal valid VM entry with all required fields populated.
@@ -46,8 +54,8 @@ Describe 'ConvertFrom-VmUsersConfigJson' {
 
         It 'normalises a bare JSON object to a 1-element array (PS 5.1 unwrap)' {
             # ConvertFrom-Json in PS 5.1 unwraps a single-element JSON array
-            # into a bare PSCustomObject. @() in the function normalises this
-            # so callers always receive an array.
+            # into a bare PSCustomObject. ConvertTo-Array normalises this so
+            # callers always receive an array.
             $result = @(ConvertFrom-VmUsersConfigJson -Json (New-ValidEntryJson))
             $result | Should -HaveCount 1
         }
