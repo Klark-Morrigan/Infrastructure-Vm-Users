@@ -7,6 +7,7 @@ state stored in a local encrypted vault.
 
 - [What this repo does](#what-this-repo-does)
 - [What it does not do](#what-it-does-not-do)
+- [Requirements](#requirements)
 - [Prerequisites](#prerequisites)
 - [Quick start](#quick-start)
 - [Config reference](#config-reference)
@@ -48,9 +49,15 @@ Joins them by `vmName`, then for each reachable VM reconciles:
 
 ---
 
+## Requirements
+
+PowerShell 7+ (`pwsh`). Windows PowerShell 5.1 is not supported.
+
+---
+
 ## Prerequisites
 
-- **Windows 11** with PowerShell 5.1 or later.
+- **Windows 11** with PowerShell 7+.
 - **[Infrastructure-Vm-Provisioner]** has already run - the `VmProvisioner`
   vault and its VMs must exist.
 - The **admin user on each VM can run sudo without a password prompt** - SSH
@@ -266,7 +273,7 @@ which delegates to the shared reusable workflow in
 VitaliiAndreev/Infrastructure-Common/.github/workflows/ci-powershell.yml@master
 ```
 
-The shared workflow runs `Run-Tests.ps1` on both PowerShell 5.1 and 7.
+The shared workflow runs `Run-Tests.ps1` on PowerShell 7.
 No additional CI configuration is needed in this repo.
 
 ---
