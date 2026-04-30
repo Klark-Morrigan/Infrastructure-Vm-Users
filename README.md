@@ -51,7 +51,7 @@ Joins them by `vmName`, then for each reachable VM reconciles:
 
 ## Requirements
 
-PowerShell 7+ (`pwsh`). Windows PowerShell 5.1 is not supported.
+PowerShell 7+ (`pwsh`).
 
 ---
 
