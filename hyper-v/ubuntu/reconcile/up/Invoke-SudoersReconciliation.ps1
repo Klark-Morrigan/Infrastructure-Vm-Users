@@ -35,14 +35,13 @@ function Invoke-SudoersReconciliation {
 
     $username = $User.username
 
-    # sudoersRules is optional in the config schema - guard with Get-Member so
-    # that user objects without the property (no sudoers rules declared) do not
-    # throw under Set-StrictMode -Version Latest.
-    # NOTE: do not use the if/else expression form here. An empty @() in a PS
-    # pipeline expression collapses to $null, causing .Count to throw under
-    # StrictMode. Separate assignments preserve the typed empty array.
-    $userMembers = (Get-Member -InputObject $User -MemberType NoteProperty).Name
-    # @() normalises PS 5.1 single-element JSON unwrapping to an array.
+    # sudoersRules is optional in the config schema - guard the property
+    # before accessing it. NOTE: do not use the if/else expression form here.
+    # An empty @() in a pipeline expression collapses to $null, causing
+    # .Count to throw under StrictMode. Separate assignments preserve the
+    # typed empty array.
+    $userMembers = $User.PSObject.Properties.Name
+    # @() ensures an array type regardless of element count.
     if ($userMembers -contains 'sudoersRules') {
         $desiredRules = @($User.sudoersRules)
     } else {

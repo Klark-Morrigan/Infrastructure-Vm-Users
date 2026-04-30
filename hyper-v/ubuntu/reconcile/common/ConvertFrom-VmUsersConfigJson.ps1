@@ -41,8 +41,8 @@ function ConvertFrom-VmUsersConfigJson {
     $userRequiredFields = @('username', 'shell', 'homeDir')
 
     # Assert-RequiredProperties is provided by Infrastructure.Common.
-    # It handles the PS 5.1-compatible Get-Member loop and IsNullOrWhiteSpace
-    # cast so this file does not need to duplicate that logic.
+    # It handles the IsNullOrWhiteSpace cast so this file does not need
+    # to duplicate that logic.
     foreach ($entry in $entries) {
         # Assert-RequiredProperties handles arrays correctly (count-based check)
         # so users can be included alongside the scalar vmName.
@@ -56,7 +56,7 @@ function ConvertFrom-VmUsersConfigJson {
         # it is valid - it means no groups need to be explicitly declared for
         # this VM. Get-Member is used to check presence without triggering
         # StrictMode on a missing property.
-        $entryMembers = (Get-Member -InputObject $entry -MemberType NoteProperty).Name
+        $entryMembers = $entry.PSObject.Properties.Name
         if ($entryMembers -contains 'groups') {
             $groups = ConvertTo-Array $entry.groups
             foreach ($group in $groups) {

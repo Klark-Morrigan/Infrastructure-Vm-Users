@@ -33,13 +33,12 @@ function Invoke-UserReconciliation {
     $shell    = $User.shell
     $homeDir  = $User.homeDir
 
-    # groups and password are optional in the config schema - guard with
-    # Get-Member so objects without these properties do not throw under
-    # StrictMode. NOTE: do not use the if/else expression form here - see
-    # reconcile-sudoers.ps1 for the reason (empty @() collapses to $null
-    # in a pipeline expression).
-    $userMembers = (Get-Member -InputObject $User -MemberType NoteProperty).Name
-    # @() normalises PS 5.1 single-element JSON unwrapping to an array.
+    # groups and password are optional in the config schema - guard the
+    # properties before accessing them. NOTE: do not use the if/else
+    # expression form here - see Invoke-SudoersReconciliation.ps1 for the
+    # reason (empty @() collapses to $null in a pipeline expression).
+    $userMembers = $User.PSObject.Properties.Name
+    # @() ensures an array type regardless of element count.
     if ($userMembers -contains 'groups') {
         $groups = @($User.groups)
     } else {
@@ -134,7 +133,7 @@ function Invoke-UserReconciliation {
 
         $shellDrifted  = $currentShell -ne $shell
         # Join sorted arrays as comma strings for a simple equality check
-        # that handles empty arrays correctly in PS 5.1.
+        # that handles empty arrays.
         $groupsDrifted = ($currentGroups -join ',') -ne ($desiredGroups -join ',')
 
         # homeDir is intentionally not reconciled - moving a home directory
