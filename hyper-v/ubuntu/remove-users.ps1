@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # latter is auto-installed below), so we do not silently install them here.
 $_common = Get-Module -ListAvailable -Name Infrastructure.Common |
     Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'1.3.3') {
+if (-not $_common -or $_common.Version -lt [Version]'2.0.0') {
     Install-Module Infrastructure.Common -Scope CurrentUser -Force
 }
 Import-Module Infrastructure.Common -Force -ErrorAction Stop

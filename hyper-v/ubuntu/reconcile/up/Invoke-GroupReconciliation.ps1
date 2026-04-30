@@ -51,9 +51,8 @@ function Invoke-GroupReconciliation {
     foreach ($group in $DeclaredGroups) {
         $groupName = $group.groupName
 
-        # gid is optional - guard with Get-Member to avoid StrictMode errors
-        # when the property is absent on the PSCustomObject.
-        $groupMembers = (Get-Member -InputObject $group -MemberType NoteProperty).Name
+        # gid is optional - guard the property before accessing it.
+        $groupMembers = $group.PSObject.Properties.Name
         $gid          = if ($groupMembers -contains 'gid') { $group.gid } else { $null }
 
         $null = $declaredGroupNames.Add($groupName)

@@ -35,11 +35,10 @@ function Invoke-VmUserCreate {
 
     $users = @($Entry.users)
 
-    # Get-Member guards the optional 'groups' property without triggering
-    # StrictMode on a missing key. @(...) collects the if-expression output
-    # into an array; when 'groups' is absent nothing is emitted and the
-    # result is @() rather than $null.
-    $entryMembers   = (Get-Member -InputObject $Entry -MemberType NoteProperty).Name
+    # Guards the optional 'groups' property before accessing it. @(...) collects
+    # the if-expression output into an array; when 'groups' is absent nothing
+    # is emitted and the result is @() rather than $null.
+    $entryMembers   = $Entry.PSObject.Properties.Name
     $declaredGroups = @(if ($entryMembers -contains 'groups') { $Entry.groups })
 
     # Step 1: groups must exist before users reference them in useradd/usermod.
