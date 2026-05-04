@@ -73,8 +73,7 @@ $provisionerJson = Get-Secret `
     -AsPlainText `
     -ErrorAction Stop
 
-# @() normalises PS 5.1 single-element JSON unwrapping to a consistent array.
-$provisionerVms = @($provisionerJson | ConvertFrom-Json)
+$provisionerVms = ConvertTo-Array ($provisionerJson | ConvertFrom-Json)
 
 Write-Host "OK - $($provisionerVms.Count) VM(s) in VmProvisionerConfig." `
     -ForegroundColor Green
@@ -94,7 +93,7 @@ $usersJson = Get-Secret `
     -AsPlainText `
     -ErrorAction Stop
 
-$userEntries = @(ConvertFrom-VmUsersConfigJson -Json $usersJson)
+$userEntries = ConvertTo-Array (ConvertFrom-VmUsersConfigJson -Json $usersJson)
 
 Write-Host "OK - $($userEntries.Count) VM entry/entries in VmUsersConfig." `
     -ForegroundColor Green
