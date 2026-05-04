@@ -38,6 +38,18 @@ function Remove-VmUsers {
         return
     }
 
+    # Kill all processes owned by the user before deletion. userdel fails
+    # with "user is currently used by process N" if any process (e.g. a
+    # lingering SSH session from a prior step) is still running as this user.
+    # SIGKILL (-9) is used because SIGTERM is asynchronous - userdel could
+    # run before the process has exited. The sleep gives the kernel time to
+    # reap the killed process entries. pkill exits 1 when nothing matches,
+    # so '; true' normalises the exit code.
+    Invoke-SshClientCommand `
+        -SshClient $SshClient `
+        -Command   "sudo pkill -9 -u '$username'; sleep 1; true" `
+        -ErrorAction Stop | Out-Null
+
     # -r removes the home directory and mail spool along with the account.
     $r = Invoke-SshClientCommand `
         -SshClient $SshClient `
