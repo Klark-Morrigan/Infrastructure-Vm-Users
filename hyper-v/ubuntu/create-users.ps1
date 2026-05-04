@@ -31,7 +31,7 @@ $ErrorActionPreference = 'Stop'
 # latter is auto-installed below), so we do not silently install them here.
 $_common = Get-Module -ListAvailable -Name Infrastructure.Common |
     Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'2.0.1') {
+if (-not $_common -or $_common.Version -lt [Version]'2.1.0') {
     Install-Module Infrastructure.Common -Scope CurrentUser -Force
 }
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
@@ -73,8 +73,7 @@ $provisionerJson = Get-Secret `
     -AsPlainText `
     -ErrorAction Stop
 
-# @() normalises PS 5.1 single-element JSON unwrapping to a consistent array.
-$provisionerVms = @($provisionerJson | ConvertFrom-Json)
+$provisionerVms = ConvertTo-Array ($provisionerJson | ConvertFrom-Json)
 
 Write-Host "OK - $($provisionerVms.Count) VM(s) in VmProvisionerConfig." `
     -ForegroundColor Green
@@ -94,7 +93,7 @@ $usersJson = Get-Secret `
     -AsPlainText `
     -ErrorAction Stop
 
-$userEntries = @(ConvertFrom-VmUsersConfigJson -Json $usersJson)
+$userEntries = ConvertTo-Array (ConvertFrom-VmUsersConfigJson -Json $usersJson)
 
 Write-Host "OK - $($userEntries.Count) VM entry/entries in VmUsersConfig." `
     -ForegroundColor Green

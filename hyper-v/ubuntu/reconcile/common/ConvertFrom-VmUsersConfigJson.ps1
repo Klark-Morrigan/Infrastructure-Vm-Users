@@ -11,8 +11,8 @@
 #   Throws a descriptive error on any problem.
 #
 #   Outputs each validated VM entry object to the pipeline. Callers must
-#   wrap the call in @() to collect the result as an array:
-#       $entries = @(ConvertFrom-VmUsersConfigJson -Json $json)
+#   use ConvertTo-Array to collect the result as an array:
+#       $entries = ConvertTo-Array (ConvertFrom-VmUsersConfigJson -Json $json)
 #
 #   Centralised here so the required-field list has a single source of
 #   truth - update it once when the config schema changes.
