@@ -167,21 +167,31 @@ provisioner config by `vmName`.
         // the attacker cannot escalate beyond u-actions-runner or the
         // runner service lifecycle.
         //
-        // Rules 1-5: act as u-actions-runner to manage files under its home.
-        //   mkdir/rm/curl/tar are scoped by binary only - sudoers cannot
+        // Rules 1-5: act as u-actions-runner to manage files in its cache dir.
+        //   mkdir/rm/curl/tar/test are scoped by binary only - sudoers cannot
         //   restrict by path argument without enabling bypass via symlinks.
         //   The constraint is that the attacker is bounded to whatever
         //   u-actions-runner itself can write.
-        // Rule 6: svc.sh runs as root (required by the install step).
-        // Rules 7-8: systemctl lifecycle for the runner service.
+        //   test is required because the runner user's home dir is mode 700;
+        //   checking for a cached tarball must run as that user.
+        // Rules 6-7: act as root to create /opt/runners/<name> and transfer
+        //   ownership to u-actions-runner. /opt/runners is root-owned so the
+        //   runner user cannot create directories there itself.
+        // Rule 8: config.sh registers the runner; runs as u-actions-runner.
+        // Rule 9: svc.sh installs/uninstalls the systemd unit; requires root.
+        // Rules 10-12: systemctl lifecycle for the runner service.
         "sudoersRules": [
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /usr/bin/mkdir",
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /usr/bin/rm",
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /usr/bin/curl",
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /usr/bin/tar",
-          "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /home/u-actions-runner/runners/*/config.sh",
-          "u-runner-deploy ALL=(root) NOPASSWD: /home/u-actions-runner/runners/*/svc.sh",
+          "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /usr/bin/test",
+          "u-runner-deploy ALL=(root) NOPASSWD: /usr/bin/mkdir",
+          "u-runner-deploy ALL=(root) NOPASSWD: /usr/bin/chown",
+          "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /opt/runners/*/config.sh",
+          "u-runner-deploy ALL=(root) NOPASSWD: /opt/runners/*/svc.sh",
           "u-runner-deploy ALL=(root) NOPASSWD: /bin/systemctl start actions.runner.*",
+          "u-runner-deploy ALL=(root) NOPASSWD: /bin/systemctl stop actions.runner.*",
           "u-runner-deploy ALL=(root) NOPASSWD: /bin/systemctl is-active actions.runner.*"
         ]
       }
