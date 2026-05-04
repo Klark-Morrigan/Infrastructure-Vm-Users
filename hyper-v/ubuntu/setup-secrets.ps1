@@ -53,8 +53,11 @@ $ErrorActionPreference = 'Stop'
 # that hasn't been installed yet.
 # NuGet must be ensured here explicitly because Invoke-ModuleInstall is not
 # yet available to do it, and Install-Module requires NuGet to reach PSGallery.
-Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 `
-    -Scope CurrentUser -Force -ForceBootstrap | Out-Null
+$_nuget = Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue
+if (-not $_nuget -or $_nuget.Version -lt [Version]'2.8.5.201') {
+    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 `
+        -Scope CurrentUser -Force -ForceBootstrap | Out-Null
+}
 $_common = Get-Module -ListAvailable -Name Infrastructure.Common |
     Sort-Object Version -Descending | Select-Object -First 1
 if (-not $_common -or $_common.Version -lt [Version]'2.1.0') {
