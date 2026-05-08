@@ -2,10 +2,10 @@
 # All tests share one SSH environment (one apt-get run, one SSH session).
 # Each Describe block owns its BeforeEach/AfterEach cleanup so user and
 # group names can be reused safely across blocks - Pester runs sequentially.
-# See Initialize-SshEnvironment.ps1 for environment setup details.
+# See Initialize-DockerHostEnvironment.ps1 for environment setup details.
 
 BeforeAll {
-    . "$PSScriptRoot\Initialize-SshEnvironment.ps1"
+    . "$PSScriptRoot\Initialize-DockerHostEnvironment.ps1"
 
     $src = [IO.Path]::Combine($PSScriptRoot, '..', '..', 'hyper-v', 'ubuntu', 'reconcile')
     . ([IO.Path]::Combine($src, 'up', 'Invoke-GroupReconciliation.ps1'))
@@ -47,7 +47,7 @@ groupdel  infra-t-group  2>/dev/null
 groupdel  infra-t-implicit 2>/dev/null
 rm -f /etc/sudoers.d/infra-t-user
 '@  | Out-Null
-    . "$PSScriptRoot\Remove-SshEnvironment.ps1"
+    . "$PSScriptRoot\Remove-DockerHostEnvironment.ps1"
 }
 
 # ---------------------------------------------------------------------------

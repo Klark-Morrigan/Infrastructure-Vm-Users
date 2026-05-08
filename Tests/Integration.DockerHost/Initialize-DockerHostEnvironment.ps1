@@ -1,8 +1,8 @@
 # ---------------------------------------------------------------------------
-# Initialize-SshEnvironment.ps1
-#   Shared BeforeAll body for integration tests. Dot-source this file
-#   inside a BeforeAll block:
-#       BeforeAll { . "$PSScriptRoot\Initialize-SshEnvironment.ps1" }
+# Initialize-DockerHostEnvironment.ps1
+#   Shared BeforeAll body for DockerHost integration tests. Dot-source this
+#   file inside a BeforeAll block:
+#       BeforeAll { . "$PSScriptRoot\Initialize-DockerHostEnvironment.ps1" }
 #
 #   When dot-sourced inside BeforeAll, all code runs in that block's scope,
 #   so $Script:* assignments land on the test file's script scope and are
@@ -123,7 +123,7 @@ Start-Sleep -Seconds 1
 Write-Step 5 'installing Infrastructure.Common from PSGallery'
 
 # Fresh container - bootstrap without Invoke-ModuleInstall.
-Install-Module Infrastructure.Common -MinimumVersion '1.3.3' `
+Install-Module Infrastructure.Common -MinimumVersion '3.0.1' `
     -Scope CurrentUser -Force -SkipPublisherCheck
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
 

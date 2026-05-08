@@ -1,10 +1,10 @@
 # ---------------------------------------------------------------------------
-# Remove-SshEnvironment.ps1
-#   Shared AfterAll body for integration tests. Dot-source this file
-#   inside an AfterAll block after any test-specific cleanup:
+# Remove-DockerHostEnvironment.ps1
+#   Shared AfterAll body for DockerHost integration tests. Dot-source this
+#   file inside an AfterAll block after any test-specific cleanup:
 #       AfterAll {
 #           & bash -c '...'   # test-specific artifact cleanup
-#           . "$PSScriptRoot\Remove-SshEnvironment.ps1"
+#           . "$PSScriptRoot\Remove-DockerHostEnvironment.ps1"
 #       }
 # ---------------------------------------------------------------------------
 
