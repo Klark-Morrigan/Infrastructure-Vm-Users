@@ -25,37 +25,19 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Bootstrap Infrastructure.Common first - it provides Invoke-ModuleInstall
-# used for all subsequent module installs. Infrastructure.Secrets and
-# Posh-SSH are prerequisites (setup-secrets.ps1 installs the former; the
-# latter is auto-installed below), so we do not silently install them here.
-$_common = Get-Module -ListAvailable -Name Infrastructure.Common |
-    Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'3.0.1') {
-    Install-Module Infrastructure.Common -Scope CurrentUser -Force -AllowClobber
-}
-Import-Module Infrastructure.Common -Force -ErrorAction Stop
+# Install / import every required PowerShell module. The helper owns the
+# dependency list for this repo so each entry-point script does not repeat
+# the bootstrap block.
+. "$PSScriptRoot\Install-ModuleDependencies.ps1"
 
-# Dot-source helpers after Infrastructure.Common is loaded so
-# Assert-RequiredProperties is available inside their function bodies.
+# Dot-source helpers after the modules are loaded so Assert-RequiredProperties
+# (Infrastructure.Common) and the SSH helpers (Infrastructure.HyperV) are
+# available inside their function bodies.
 . "$PSScriptRoot\reconcile\common\ConvertFrom-VmUsersConfigJson.ps1"
 . "$PSScriptRoot\reconcile\up\Invoke-GroupReconciliation.ps1"
 . "$PSScriptRoot\reconcile\up\Invoke-SudoersReconciliation.ps1"
 . "$PSScriptRoot\reconcile\up\Invoke-UserReconciliation.ps1"
 . "$PSScriptRoot\reconcile\up\Invoke-VmUserCreate.ps1"
-
-# Infrastructure.Secrets must already be installed by setup-secrets.ps1.
-Import-Module Infrastructure.Secrets                    -ErrorAction Stop
-Import-Module Microsoft.PowerShell.SecretManagement    -ErrorAction Stop
-
-# Posh-SSH is installed here solely to obtain its bundled Renci.SshNet.dll.
-# Posh-SSH's own cmdlets (New-SSHSession, Invoke-SSHCommand) are NOT used
-# because ConnectionInfoGenerator in Posh-SSH 3.x has a bug that drops
-# algorithm entries from the SSH.NET ConnectionInfo, causing "Key exchange
-# negotiation failed" against OpenSSH 9.x (Ubuntu 24.04). SSH.NET is used
-# directly instead via Invoke-SshClientCommand (Infrastructure.Common) and the
-# connection block in the reconciliation loop below.
-Invoke-ModuleInstall -ModuleName 'Posh-SSH'
 
 # ---------------------------------------------------------------------------
 # 1. Read VmProvisionerConfig from the VmProvisioner vault
