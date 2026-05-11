@@ -119,10 +119,11 @@ Write-Host "Matched $($targets.Count) of $($userEntries.Count) VM entry/entries.
     -ForegroundColor Cyan
 
 # ---------------------------------------------------------------------------
-# 4. Ping each matched VM
-#    Test-Connection -Quiet returns $true/$false without throwing.
-#    -Count 1 keeps it fast; a single echo reply is enough to confirm the VM
-#    is up and the host can reach it.
+# 4. Probe SSH on each matched VM
+#    Test-VmSshPort answers "is sshd accepting connections?" - a strict
+#    superset of an ICMP ping, since a successful TCP connect implies the
+#    host is up AND has bound port 22. Eliminates the post-reboot race
+#    where ICMP succeeds before sshd binds.
 # ---------------------------------------------------------------------------
 
 $reachable = [System.Collections.Generic.List[hashtable]]::new()
@@ -131,14 +132,14 @@ foreach ($t in $targets) {
     $name = $t.Entry.vmName
     $ip   = $t.Provisioner.ipAddress
 
-    Write-Host "[$name] Pinging ..." -ForegroundColor Cyan
+    Write-Host "[$name] Probing SSH ..." -ForegroundColor Cyan
 
-    if (Test-Connection -ComputerName $ip -Count 1 -Quiet) {
-        Write-Host "[$name] Reachable." -ForegroundColor Green
+    if (Test-VmSshPort -IpAddress $ip) {
+        Write-Host "[$name] SSH reachable." -ForegroundColor Green
         $reachable.Add($t)
     }
     else {
-        Write-Warning "[$name] Unreachable - skipping."
+        Write-Warning "[$name] SSH unreachable - skipping."
     }
 }
 
