@@ -47,31 +47,15 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Bootstrap Infrastructure.Common, which provides Invoke-ModuleInstall used
-# for all subsequent module installs. This inline block is the only install
-# logic that cannot be abstracted - you cannot call a function from a module
-# that hasn't been installed yet.
-# NuGet must be ensured here explicitly because Invoke-ModuleInstall is not
-# yet available to do it, and Install-Module requires NuGet to reach PSGallery.
-$_nuget = Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue
-if (-not $_nuget -or $_nuget.Version -lt [Version]'2.8.5.201') {
-    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 `
-        -Scope CurrentUser -Force -ForceBootstrap | Out-Null
-}
-$_common = Get-Module -ListAvailable -Name Infrastructure.Common |
-    Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'3.0.1') {
-    Install-Module Infrastructure.Common -Scope CurrentUser -Force -AllowClobber
-}
-Import-Module Infrastructure.Common -Force -ErrorAction Stop
+# Install / import every required PowerShell module via the centralised
+# helper. Owns NuGet provider, Infrastructure.Common, Infrastructure.Secrets,
+# and the rest of this repo's deps in one place.
+. "$PSScriptRoot\Install-ModuleDependencies.ps1"
 
-# ConvertFrom-VmUsersConfigJson.ps1 is dot-sourced after Infrastructure.Common
-# is loaded. It only calls Assert-RequiredProperties inside function bodies,
+# ConvertFrom-VmUsersConfigJson.ps1 is dot-sourced after the modules are
+# loaded. It only calls Assert-RequiredProperties inside function bodies,
 # not at load time, so this ordering is safe.
 . "$PSScriptRoot\reconcile\common\ConvertFrom-VmUsersConfigJson.ps1"
-
-# The minimum version is pinned here - bump it when a newer feature is required.
-Invoke-ModuleInstall -ModuleName 'Infrastructure.Secrets' -MinimumVersion '3.0.1'
 
 Initialize-MicrosoftPowerShellSecretStoreVault `
     -VaultName  'VmUsers' `

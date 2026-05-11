@@ -104,37 +104,59 @@ if ($sshdConfig -match '(?m)^#?PasswordAuthentication') {
 Set-Content -Path $sshdConfigPath -Value $sshdConfig
 
 # -----------------------------------------------------------------------
-# 4. Start sshd and wait for it to bind
+# 4. Install Infrastructure.Common and Infrastructure.HyperV
+#    Done before starting sshd because Wait-VmSshReady (HyperV) is used in
+#    step 5 to gate sshd's port-22 bind. Posh-SSH is installed later -
+#    its SSH.NET DLL is only needed in step 7 when the test opens its own
+#    SshClient. Common and HyperV are installed via direct Install-Module
+#    rather than Invoke-ModuleInstall because the container is fresh and
+#    Invoke-ModuleInstall ships in Common itself.
 # -----------------------------------------------------------------------
 
-Write-Step 4 'starting sshd'
+Write-Step 4 'installing Infrastructure.Common from PSGallery'
 
-& /usr/sbin/sshd
-Start-Sleep -Seconds 1
-
-# -----------------------------------------------------------------------
-# 5. Install Infrastructure.Common (provides Invoke-SshClientCommand), then
-#    Posh-SSH (for its bundled SSH.NET DLL), and dot-source reconciliation
-#    functions. Posh-SSH cmdlets are NOT used - SSH.NET is used directly
-#    to avoid the Posh-SSH 3.x ConnectionInfoGenerator bug that drops
-#    algorithm entries and causes KEX failure against OpenSSH 9.x.
-# -----------------------------------------------------------------------
-
-Write-Step 5 'installing Infrastructure.Common from PSGallery'
-
-# Fresh container - bootstrap without Invoke-ModuleInstall.
-Install-Module Infrastructure.Common -MinimumVersion '3.0.1' `
+Install-Module Infrastructure.Common -MinimumVersion '4.0.0' `
     -Scope CurrentUser -Force -SkipPublisherCheck
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
 
-Write-Step 5 'installing Posh-SSH (SSH.NET carrier) from PSGallery'
+Write-Step 4 'installing Infrastructure.HyperV from PSGallery'
+
+# Provides Invoke-SshClientCommand used by Invoke-SshQuery below, plus
+# Wait-VmSshReady used to gate sshd startup in step 5.
+Install-Module Infrastructure.HyperV -MinimumVersion '0.2.0' `
+    -Scope CurrentUser -Force -SkipPublisherCheck
+Import-Module Infrastructure.HyperV -Force -ErrorAction Stop
+
+# -----------------------------------------------------------------------
+# 5. Start sshd and wait for it to bind
+# -----------------------------------------------------------------------
+
+Write-Step 5 'starting sshd'
+
+& /usr/sbin/sshd
+# Wait for sshd to bind port 22 deterministically. The previous fixed
+# Start-Sleep -Seconds 1 was a guess; on a slow container it could race
+# the subsequent SSH connect attempt.
+if (-not (Wait-VmSshReady -IpAddress 'localhost' -TimeoutSeconds 10 `
+                          -PollIntervalSeconds 1)) {
+    throw "sshd did not become reachable on localhost:22 within 10s."
+}
+
+# -----------------------------------------------------------------------
+# 6. Install Posh-SSH (for its bundled SSH.NET DLL) and dot-source
+#    reconciliation functions. Posh-SSH cmdlets are NOT used - SSH.NET is
+#    used directly to avoid the Posh-SSH 3.x ConnectionInfoGenerator bug
+#    that drops algorithm entries and causes KEX failure against OpenSSH 9.x.
+# -----------------------------------------------------------------------
+
+Write-Step 6 'installing Posh-SSH (SSH.NET carrier) from PSGallery'
 
 Install-Module Posh-SSH -MinimumVersion 3.0.0 `
     -Scope CurrentUser -Force -SkipPublisherCheck
 # Import-Module loads the bundled Renci.SshNet.dll into the session.
 Import-Module Posh-SSH
 
-Write-Step 5 'dot-sourcing reconciliation functions'
+Write-Step 6 'dot-sourcing reconciliation functions'
 
 $src = [IO.Path]::Combine($PSScriptRoot, '..', '..', 'hyper-v', 'ubuntu', 'reconcile')
 . ([IO.Path]::Combine($src, 'common', 'ConvertFrom-VmUsersConfigJson.ps1'))
@@ -143,10 +165,10 @@ $src = [IO.Path]::Combine($PSScriptRoot, '..', '..', 'hyper-v', 'ubuntu', 'recon
 . ([IO.Path]::Combine($src, 'up',     'Invoke-UserReconciliation.ps1'))
 
 # -----------------------------------------------------------------------
-# 6. Open SSH session to localhost via SSH.NET directly.
+# 7. Open SSH session to localhost via SSH.NET directly.
 # -----------------------------------------------------------------------
 
-Write-Step 6 'opening SSH session to localhost'
+Write-Step 7 'opening SSH session to localhost'
 
 $auth             = [Renci.SshNet.PasswordAuthenticationMethod]::new(
                         $Script:AdminUser, $Script:AdminPass)
@@ -157,12 +179,12 @@ $Script:SshClient.Connect()
 $Script:VmName    = 'test-vm'
 
 # -----------------------------------------------------------------------
-# 7. Define shared helper
+# 8. Define shared helper
 #    Must be inside BeforeAll - functions defined at script level are not
 #    in scope when It blocks execute in Pester 5.
 # -----------------------------------------------------------------------
 
-Write-Step 7 'defining shared helpers'
+Write-Step 8 'defining shared helpers'
 
 function Invoke-SshQuery {
     param([string] $Command)
@@ -171,4 +193,4 @@ function Invoke-SshQuery {
     return ($r.Output -join '').Trim()
 }
 
-Write-Step 7 'BeforeAll complete'
+Write-Step 8 'BeforeAll complete'
