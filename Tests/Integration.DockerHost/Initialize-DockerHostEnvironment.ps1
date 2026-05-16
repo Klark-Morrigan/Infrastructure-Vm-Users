@@ -123,7 +123,7 @@ Write-Step 4 'installing Infrastructure.HyperV from PSGallery'
 
 # Provides Invoke-SshClientCommand used by Invoke-SshQuery below, plus
 # Wait-VmSshReady used to gate sshd startup in step 5.
-Install-Module Infrastructure.HyperV -MinimumVersion '0.2.0' `
+Install-Module Infrastructure.HyperV -MinimumVersion '0.3.0' `
     -Scope CurrentUser -Force -SkipPublisherCheck
 Import-Module Infrastructure.HyperV -Force -ErrorAction Stop
 

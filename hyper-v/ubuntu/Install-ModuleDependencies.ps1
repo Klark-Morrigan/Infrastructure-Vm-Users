@@ -53,7 +53,7 @@ Import-Module Infrastructure.Common -Force -ErrorAction Stop
 
 # Step 3 - Infrastructure.HyperV (SSH execution, host file server,
 # Test-VmSshPort, Wait-VmSshReady)
-Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.2.0'
+Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.3.0'
 
 # Step 4 - Posh-SSH (SSH.NET DLL carrier - see header comment)
 Invoke-ModuleInstall -ModuleName 'Posh-SSH'
