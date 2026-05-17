@@ -115,7 +115,7 @@ Set-Content -Path $sshdConfigPath -Value $sshdConfig
 
 Write-Step 4 'installing Infrastructure.Common from PSGallery'
 
-Install-Module Infrastructure.Common -MinimumVersion '4.0.0' `
+Install-Module Infrastructure.Common -MinimumVersion '4.0.1' `
     -Scope CurrentUser -Force -SkipPublisherCheck
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
 
@@ -123,7 +123,7 @@ Write-Step 4 'installing Infrastructure.HyperV from PSGallery'
 
 # Provides Invoke-SshClientCommand used by Invoke-SshQuery below, plus
 # Wait-VmSshReady used to gate sshd startup in step 5.
-Install-Module Infrastructure.HyperV -MinimumVersion '0.3.0' `
+Install-Module Infrastructure.HyperV -MinimumVersion '0.3.1' `
     -Scope CurrentUser -Force -SkipPublisherCheck
 Import-Module Infrastructure.HyperV -Force -ErrorAction Stop
 

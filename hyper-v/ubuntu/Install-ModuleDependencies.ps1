@@ -46,14 +46,14 @@ if (-not $_nuget -or $_nuget.Version -lt [Version]'2.8.5.201') {
 # Step 2 - Infrastructure.Common (chicken-and-egg bootstrap)
 $_common = Get-Module -ListAvailable -Name Infrastructure.Common |
     Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'4.0.0') {
+if (-not $_common -or $_common.Version -lt [Version]'4.0.1') {
     Install-Module Infrastructure.Common -Scope CurrentUser -Force -AllowClobber
 }
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
 
 # Step 3 - Infrastructure.HyperV (SSH execution, host file server,
 # Test-VmSshPort, Wait-VmSshReady)
-Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.3.0'
+Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.3.1'
 
 # Step 4 - Posh-SSH (SSH.NET DLL carrier - see header comment)
 Invoke-ModuleInstall -ModuleName 'Posh-SSH'
