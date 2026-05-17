@@ -117,7 +117,17 @@ Write-Step 4 'installing Infrastructure.Common from PSGallery'
 
 Install-Module Infrastructure.Common -MinimumVersion '4.0.1' `
     -Scope CurrentUser -Force -SkipPublisherCheck
-Import-Module Infrastructure.Common -Force -ErrorAction Stop
+# Reload only when the loaded state differs from the target (multiple
+# versions live, or wrong version live). Mirrors the conditional in
+# Invoke-ModuleInstall - inlined here because this script runs before
+# Infrastructure.Common is available.
+$_common = Get-Module -ListAvailable -Name Infrastructure.Common |
+    Sort-Object Version -Descending | Select-Object -First 1
+$_loaded = @(Get-Module -Name Infrastructure.Common)
+if ($_loaded.Count -ne 1 -or $_loaded[0].Version -ne $_common.Version) {
+    if ($_loaded) { $_loaded | Remove-Module -Force }
+    Import-Module Infrastructure.Common -Force -ErrorAction Stop
+}
 
 Write-Step 4 'installing Infrastructure.HyperV from PSGallery'
 
