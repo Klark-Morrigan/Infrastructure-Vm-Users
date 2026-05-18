@@ -177,9 +177,14 @@ provisioner config by `vmName`.
         // Rules 6-7: act as root to create /opt/runners/<name> and transfer
         //   ownership to u-actions-runner. /opt/runners is root-owned so the
         //   runner user cannot create directories there itself.
-        // Rule 8: config.sh registers the runner; runs as u-actions-runner.
-        // Rule 9: svc.sh installs/uninstalls the systemd unit; requires root.
-        // Rules 10-12: systemctl lifecycle for the runner service.
+        // Rule 8: act as root to remove a runner directory under
+        //   /opt/runners during deregistration. The wildcard matches one
+        //   path component only (sudoers '*' does not match '/'), and
+        //   rm refuses '.' and '..', so the blast radius is bounded to
+        //   /opt/runners/<single-name>.
+        // Rule 9: config.sh registers the runner; runs as u-actions-runner.
+        // Rule 10: svc.sh installs/uninstalls the systemd unit; requires root.
+        // Rules 11-13: systemctl lifecycle for the runner service.
         "sudoersRules": [
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /usr/bin/mkdir",
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /usr/bin/rm",
@@ -188,6 +193,7 @@ provisioner config by `vmName`.
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /usr/bin/test",
           "u-runner-deploy ALL=(root) NOPASSWD: /usr/bin/mkdir",
           "u-runner-deploy ALL=(root) NOPASSWD: /usr/bin/chown",
+          "u-runner-deploy ALL=(root) NOPASSWD: /usr/bin/rm -rf /opt/runners/*",
           "u-runner-deploy ALL=(u-actions-runner) NOPASSWD: /opt/runners/*/config.sh",
           "u-runner-deploy ALL=(root) NOPASSWD: /opt/runners/*/svc.sh",
           "u-runner-deploy ALL=(root) NOPASSWD: /bin/systemctl start actions.runner.*",
