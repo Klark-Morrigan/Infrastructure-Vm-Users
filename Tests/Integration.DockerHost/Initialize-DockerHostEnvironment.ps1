@@ -104,7 +104,7 @@ if ($sshdConfig -match '(?m)^#?PasswordAuthentication') {
 Set-Content -Path $sshdConfigPath -Value $sshdConfig
 
 # -----------------------------------------------------------------------
-# 4. Install Infrastructure.Common and Infrastructure.HyperV
+# 4. Install PowerShell.Common and Infrastructure.HyperV
 #    Done before starting sshd because Wait-VmSshReady (HyperV) is used in
 #    step 5 to gate sshd's port-22 bind. Posh-SSH is installed later -
 #    its SSH.NET DLL is only needed in step 7 when the test opens its own
@@ -113,10 +113,10 @@ Set-Content -Path $sshdConfigPath -Value $sshdConfig
 #    Invoke-ModuleInstall ships in Common itself.
 # -----------------------------------------------------------------------
 
-Write-Step 4 'installing Infrastructure.Common from PSGallery'
+Write-Step 4 'installing PowerShell.Common from PSGallery'
 
 # Inline retry for the chicken-and-egg case: Invoke-ModuleInstall (which
-# has retry built in) ships inside Infrastructure.Common, so it cannot be
+# has retry built in) ships inside PowerShell.Common, so it cannot be
 # used to install Common itself. Six attempts with exponential backoff
 # (10 s -> 20 -> 40 -> 80 -> 160, capped at 300 s) covers transient
 # PSGallery "Unable to resolve package source" blips without stalling an
@@ -128,14 +128,14 @@ for ($_attempt = 1; $_attempt -le $_installAttempts; $_attempt++) {
     try {
         # -ErrorAction Stop promotes the PSGallery resolution warning to a
         # terminating error so the catch block can see and retry it.
-        Install-Module Infrastructure.Common -MinimumVersion '5.1.0' `
+        Install-Module PowerShell.Common -MinimumVersion '5.1.0' `
             -Scope CurrentUser -Force -SkipPublisherCheck -ErrorAction Stop
         break
     }
     catch {
         if ($_attempt -ge $_installAttempts) { throw }
         Write-Warning (
-            "Install-Module Infrastructure.Common failed " +
+            "Install-Module PowerShell.Common failed " +
             "(attempt $_attempt/$_installAttempts): " +
             "$($_.Exception.Message). Retrying in ${_installDelaySeconds}s ..."
         )
@@ -148,13 +148,13 @@ for ($_attempt = 1; $_attempt -le $_installAttempts; $_attempt++) {
 # Reload only when the loaded state differs from the target (multiple
 # versions live, or wrong version live). Mirrors the conditional in
 # Invoke-ModuleInstall - inlined here because this script runs before
-# Infrastructure.Common is available.
-$_common = Get-Module -ListAvailable -Name Infrastructure.Common |
+# PowerShell.Common is available.
+$_common = Get-Module -ListAvailable -Name PowerShell.Common |
     Sort-Object Version -Descending | Select-Object -First 1
-$_loaded = @(Get-Module -Name Infrastructure.Common)
+$_loaded = @(Get-Module -Name PowerShell.Common)
 if ($_loaded.Count -ne 1 -or $_loaded[0].Version -ne $_common.Version) {
     if ($_loaded) { $_loaded | Remove-Module -Force }
-    Import-Module Infrastructure.Common -Force -ErrorAction Stop
+    Import-Module PowerShell.Common -Force -ErrorAction Stop
 }
 
 Write-Step 4 'installing Infrastructure.HyperV from PSGallery'

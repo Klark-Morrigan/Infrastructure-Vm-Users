@@ -31,7 +31,7 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\Install-ModuleDependencies.ps1"
 
 # Dot-source helpers after the modules are loaded so Assert-RequiredProperties
-# (Infrastructure.Common) and the SSH helpers (Infrastructure.HyperV) are
+# (PowerShell.Common) and the SSH helpers (Infrastructure.HyperV) are
 # available inside their function bodies.
 . "$PSScriptRoot\reconcile\common\ConvertFrom-VmUsersConfigJson.ps1"
 . "$PSScriptRoot\reconcile\up\Invoke-GroupReconciliation.ps1"

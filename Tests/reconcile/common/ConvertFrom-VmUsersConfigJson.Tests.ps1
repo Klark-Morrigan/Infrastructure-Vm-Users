@@ -1,13 +1,13 @@
 BeforeAll {
     # Stub Assert-RequiredProperties before dot-sourcing so the function exists
     # when ConvertFrom-VmUsersConfigJson.ps1 is loaded. The real implementation
-    # lives in Infrastructure.Common, which is not required in the test
+    # lives in PowerShell.Common, which is not required in the test
     # environment.
     function Assert-RequiredProperties {
         param($Object, $Properties, $Context)
     }
 
-    # ConvertTo-Array is provided by Infrastructure.Common at runtime.
+    # ConvertTo-Array is provided by PowerShell.Common at runtime.
     # Stub it here so the unit tests have no cross-repo dependency.
     function ConvertTo-Array {
         param([AllowNull()] $InputObject)
@@ -145,7 +145,7 @@ Describe 'ConvertFrom-VmUsersConfigJson' {
         It 'throws when the users array is empty' {
             # Assert-RequiredProperties is stubbed as a no-op, so the
             # count check further down is what fires here.
-            # The real Assert-RequiredProperties (tested in Infrastructure.Common)
+            # The real Assert-RequiredProperties (tested in PowerShell.Common)
             # catches this earlier with "empty required property 'users'".
             $json = '[{ "vmName": "node-01", "users": [] }]'
             { ConvertFrom-VmUsersConfigJson -Json $json } |
