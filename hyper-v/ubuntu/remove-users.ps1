@@ -25,7 +25,12 @@
 #>
 
 [CmdletBinding()]
-param()
+param(
+    # Required. See create-users.ps1 for the suffix contract.
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string] $SecretSuffix
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -51,18 +56,19 @@ $ErrorActionPreference = 'Stop'
 #    and intentionally ignored.
 # ---------------------------------------------------------------------------
 
-Write-Host "Reading VmProvisionerConfig from VmProvisioner vault ..." `
+$provisionerSecretName = "VmProvisionerConfig-$SecretSuffix"
+Write-Host "Reading $provisionerSecretName from VmProvisioner vault ..." `
     -ForegroundColor Cyan
 
 $provisionerJson = Get-Secret `
     -Vault VmProvisioner `
-    -Name  VmProvisionerConfig `
+    -Name  $provisionerSecretName `
     -AsPlainText `
     -ErrorAction Stop
 
 $provisionerVms = ConvertTo-Array ($provisionerJson | ConvertFrom-Json)
 
-Write-Host "OK - $($provisionerVms.Count) VM(s) in VmProvisionerConfig." `
+Write-Host "OK - $($provisionerVms.Count) VM(s) in $provisionerSecretName." `
     -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
@@ -71,18 +77,19 @@ Write-Host "OK - $($provisionerVms.Count) VM(s) in VmProvisionerConfig." `
 #    to the pipeline; @() collects all of them.
 # ---------------------------------------------------------------------------
 
-Write-Host "Reading VmUsersConfig from VmUsers vault ..." `
+$usersSecretName = "VmUsersConfig-$SecretSuffix"
+Write-Host "Reading $usersSecretName from VmUsers vault ..." `
     -ForegroundColor Cyan
 
 $usersJson = Get-Secret `
     -Vault VmUsers `
-    -Name  VmUsersConfig `
+    -Name  $usersSecretName `
     -AsPlainText `
     -ErrorAction Stop
 
 $userEntries = ConvertTo-Array (ConvertFrom-VmUsersConfigJson -Json $usersJson)
 
-Write-Host "OK - $($userEntries.Count) VM entry/entries in VmUsersConfig." `
+Write-Host "OK - $($userEntries.Count) VM entry/entries in $usersSecretName." `
     -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
