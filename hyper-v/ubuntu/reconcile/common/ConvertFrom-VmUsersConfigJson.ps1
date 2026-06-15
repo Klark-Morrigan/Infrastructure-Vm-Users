@@ -1,7 +1,7 @@
 <#
 .NOTES
     Do not run this file directly. It is intended to be dot-sourced by
-    setup-secrets.ps1 and create-users.ps1 after PowerShell.Common
+    setup-secrets.ps1 and create-users.ps1 after Common.PowerShell
     is loaded.
 #>
 
@@ -40,7 +40,7 @@ function ConvertFrom-VmUsersConfigJson {
 
     $userRequiredFields = @('username', 'shell', 'homeDir')
 
-    # Assert-RequiredProperties is provided by PowerShell.Common.
+    # Assert-RequiredProperties is provided by Common.PowerShell.
     # It handles the IsNullOrWhiteSpace cast so this file does not need
     # to duplicate that logic.
     foreach ($entry in $entries) {

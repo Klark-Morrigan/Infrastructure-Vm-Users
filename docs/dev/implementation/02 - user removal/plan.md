@@ -257,7 +257,7 @@ same vault reads, same join, same ping, same SSH loop - calling
 **File**: `hyper-v/ubuntu/remove-users.ps1`
 
 **Behaviour**:
-- Bootstrap PowerShell.Common, Infrastructure.Secrets, Posh-SSH
+- Bootstrap Common.PowerShell, Infrastructure.Secrets, Posh-SSH
   (same block as `create-users.ps1`).
 - Dot-source all `reconcile/common/` and `reconcile/down/` helpers.
 - Read `VmProvisionerConfig` and `VmUsersConfig` from vaults.

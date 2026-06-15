@@ -74,7 +74,7 @@ PowerShell 7+ (`pwsh`).
   default for Ubuntu cloud images provisioned with cloud-init (set up
   automatically via `/etc/sudoers.d/90-cloud-init-users`).
 - An internet connection on first run (PSGallery is used to install
-  `PowerShell.Common`, `Infrastructure.Secrets`, and `Posh-SSH`
+  `Common.PowerShell`, `Infrastructure.Secrets`, and `Posh-SSH`
   automatically). Posh-SSH is used as the carrier for its bundled
   SSH.NET library; its own cmdlets are not used directly.
 
@@ -291,10 +291,10 @@ group from each reachable VM. On each run:
 
 CI runs on pull requests targeting `master` via `.github/workflows/ci.yml`,
 which delegates to the shared reusable workflow in
-[PowerShell-Common](https://github.com/VitaliiAndreev/PowerShell-Common):
+[Common-PowerShell](https://github.com/VitaliiAndreev/Common-PowerShell):
 
 ```
-VitaliiAndreev/PowerShell-Common/.github/workflows/ci-powershell.yml@master
+VitaliiAndreev/Common-PowerShell/.github/workflows/ci-powershell.yml@master
 ```
 
 The shared workflow runs `scripts\Run-Tests.ps1` on PowerShell 7.
@@ -308,7 +308,7 @@ No additional CI configuration is needed in this repo.
 Infrastructure-Vm-Users/
 |- .github/
 |  `- workflows/
-|     `- ci.yml              # Delegates to shared ci-powershell.yml in PowerShell-Common
+|     `- ci.yml              # Delegates to shared ci-powershell.yml in Common-PowerShell
 |- hyper-v/
 |  `- ubuntu/
 |     |- create-users.ps1    # Entry point - reconciles groups, users, and sudoers

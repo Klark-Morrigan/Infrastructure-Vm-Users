@@ -56,7 +56,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Install / import every required PowerShell module via the centralised
-# helper. Owns NuGet provider, PowerShell.Common, Infrastructure.Secrets,
+# helper. Owns NuGet provider, Common.PowerShell, Infrastructure.Secrets,
 # and the rest of this repo's deps in one place.
 . "$PSScriptRoot\Install-ModuleDependencies.ps1"
 
