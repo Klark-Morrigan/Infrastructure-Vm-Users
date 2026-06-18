@@ -15,7 +15,7 @@
 
 ## Context
 
-PowerShell-Common (2.0.0), Infrastructure-Secrets (3.0.0), and
+Common-PowerShell (2.0.0), Infrastructure-Secrets (3.0.0), and
 Infrastructure-Vm-Provisioner have all dropped PS 5.1 support.
 Infrastructure-Vm-Users is the remaining repo in the family that still
 declares and codes for PS 5.1 compatibility.
@@ -69,7 +69,7 @@ Both have had major-version bumps as part of this family-wide PS 5.1 drop:
 
 | Module | Old pin | New pin |
 |--------|---------|---------|
-| `PowerShell.Common` | `1.3.3` | `2.0.0` |
+| `Common.PowerShell` | `1.3.3` | `2.0.0` |
 | `Infrastructure.Secrets` | `2.1.0` | `3.0.0` |
 
 ### Documentation

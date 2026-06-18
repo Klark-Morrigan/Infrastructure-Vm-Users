@@ -41,7 +41,7 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\Install-ModuleDependencies.ps1"
 
 # Dot-source helpers after the modules are loaded so Assert-RequiredProperties
-# (PowerShell.Common) and the SSH helpers (Infrastructure.HyperV) are
+# (Common.PowerShell) and the SSH helpers (Infrastructure.HyperV) are
 # available inside their function bodies.
 . "$PSScriptRoot\reconcile\common\ConvertFrom-VmUsersConfigJson.ps1"
 . "$PSScriptRoot\reconcile\down\Invoke-VmUserRemove.ps1"
@@ -70,6 +70,51 @@ $provisionerVms = ConvertTo-Array ($provisionerJson | ConvertFrom-Json)
 
 Write-Host "OK - $($provisionerVms.Count) VM(s) in $provisionerSecretName." `
     -ForegroundColor Green
+
+# ---------------------------------------------------------------------------
+# 1b. Router-VM resolution (feature-53 NAT topology)
+#    Workloads in the per-environment private switch are not reachable from
+#    the host directly - the router VM forwards their SSH via MASQUERADE.
+#    Find any router row in the same VmProvisionerConfig batch (kind ==
+#    'router'), discover its upstream IP via Hyper-V KVP, and stamp it as
+#    _RouterVm on each workload so New-VmSshClientWithJump picks the
+#    jump-through-router path for that workload's session.
+#
+#    Symmetric with create-users.ps1's resolution block; both scripts
+#    own the same lookup so neither becomes the implicit pre-condition
+#    for the other.
+# ---------------------------------------------------------------------------
+
+$routerVm = $provisionerVms | Where-Object {
+    $_.PSObject.Properties['kind'] -and $_.kind -eq 'router'
+} | Select-Object -First 1
+
+if ($null -ne $routerVm) {
+    Import-Module Hyper-V -ErrorAction Stop
+
+    if (-not ($routerVm.PSObject.Properties['ipAddress'] -and $routerVm.ipAddress)) {
+        Write-Host "Resolving router '$($routerVm.vmName)' upstream IP via KVP ..." `
+            -NoNewline -ForegroundColor Cyan
+        $routerIp = Get-VmKvpIpAddress `
+                        -VmName     $routerVm.vmName `
+                        -SwitchName $routerVm.externalSwitchName `
+                        -OnPoll     { Write-Host '.' -NoNewline -ForegroundColor Cyan }
+        Add-Member -InputObject $routerVm -MemberType NoteProperty `
+                   -Name 'ipAddress' -Value $routerIp -Force
+        Write-Host " $routerIp" -ForegroundColor Green
+    }
+
+    foreach ($vm in $provisionerVms) {
+        $isRouter = $vm.PSObject.Properties['kind'] -and $vm.kind -eq 'router'
+        if ($isRouter) { continue }
+        $sameEnv = $vm.PSObject.Properties['privateSwitchName'] -and
+                   $vm.privateSwitchName -eq $routerVm.privateSwitchName
+        if (-not $sameEnv) { continue }
+
+        Add-Member -InputObject $vm -MemberType NoteProperty `
+                   -Name '_RouterVm' -Value $routerVm -Force
+    }
+}
 
 # ---------------------------------------------------------------------------
 # 2. Read VmUsersConfig from the VmUsers vault
@@ -131,13 +176,26 @@ Write-Host "Matched $($targets.Count) of $($userEntries.Count) VM entry/entries.
 #    superset of an ICMP ping, since a successful TCP connect implies the
 #    host is up AND has bound port 22. Eliminates the post-reboot race
 #    where ICMP succeeds before sshd binds.
+#
+#    Workloads carrying _RouterVm (feature-53 NAT topology) sit on a
+#    private switch the host has no route to - skip the direct probe
+#    and rely on the connect attempt's own diagnostics.
 # ---------------------------------------------------------------------------
 
 $reachable = [System.Collections.Generic.List[hashtable]]::new()
 
 foreach ($t in $targets) {
     $name = $t.Entry.vmName
-    $ip   = $t.Provisioner.ipAddress
+    $prov = $t.Provisioner
+    $ip   = $prov.ipAddress
+
+    $hasRouter = $prov.PSObject.Properties['_RouterVm'] -and $prov._RouterVm
+    if ($hasRouter) {
+        Write-Host "[$name] Skipping direct SSH probe (jumped through router)." `
+            -ForegroundColor Cyan
+        $reachable.Add($t)
+        continue
+    }
 
     Write-Host "[$name] Probing SSH ..." -ForegroundColor Cyan
 
@@ -173,26 +231,17 @@ foreach ($t in $reachable) {
     Write-Host "[$name] Connecting as '$($prov.username)' ..." `
         -ForegroundColor Cyan
 
-    # $sshClient is declared before the try so the finally block can always
-    # reference it, even when Connect() throws before the assignment.
-    $sshClient = $null
+    # New-VmSshClientWithJump branches on _RouterVm: jumped through
+    # router when stamped (feature-53 NAT), direct otherwise. The
+    # returned session exposes Client + Tunnel + Dispose() so the
+    # surrounding flow does not have to branch.
+    $sshSession = $null
 
     try {
-        # Connect via SSH.NET directly, bypassing Posh-SSH's wrapper.
-        # See the Posh-SSH comment above for why this is necessary.
-        #
-        # PasswordAuthenticationMethod requires a plain string. VM passwords
-        # originate as JSON field values (ConvertFrom-Json -> [string]);
-        # converting to SecureString would only require converting back here.
-        $auth      = [Renci.SshNet.PasswordAuthenticationMethod]::new(
-                         $prov.username, $prov.password)
-        $connInfo  = [Renci.SshNet.ConnectionInfo]::new(
-                         $prov.ipAddress, $prov.username, @($auth))
-        $sshClient = [Renci.SshNet.SshClient]::new($connInfo)
-        $sshClient.Connect()
+        $sshSession = New-VmSshClientWithJump -Vm $prov
 
         Invoke-VmUserRemove `
-            -SshClient $sshClient `
+            -SshClient $sshSession.Client `
             -VmName    $name `
             -Entry     $t.Entry
     }
@@ -200,16 +249,14 @@ foreach ($t in $reachable) {
         Write-Error "[$name] SSH connection failed: $($_.Exception.Message)"
     }
     catch [System.Net.Sockets.SocketException] {
-        # "Connection refused" - SSH is not listening on port 22.
-        # The VM is up (ping passed) but sshd may not have started yet.
+        # "Connection refused" - SSH is not listening on port 22 on
+        # the workload (or the router, when jumped). The VM is up
+        # (probe / route succeeded) but sshd may not have started yet.
         Write-Error "[$name] SSH port refused: $($_.Exception.Message)"
     }
     finally {
-        # Always release the TCP connection, even if Connect() or an
-        # operation above threw.
-        if ($null -ne $sshClient) {
-            if ($sshClient.IsConnected) { $sshClient.Disconnect() }
-            $sshClient.Dispose()
+        if ($null -ne $sshSession) {
+            try { $sshSession.Dispose() } catch {}
         }
     }
 }

@@ -41,7 +41,7 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\Install-ModuleDependencies.ps1"
 
 # Dot-source helpers after the modules are loaded so Assert-RequiredProperties
-# (PowerShell.Common) and the SSH helpers (Infrastructure.HyperV) are
+# (Common.PowerShell) and the SSH helpers (Infrastructure.HyperV) are
 # available inside their function bodies.
 . "$PSScriptRoot\reconcile\common\ConvertFrom-VmUsersConfigJson.ps1"
 . "$PSScriptRoot\reconcile\up\Invoke-GroupReconciliation.ps1"
@@ -70,6 +70,64 @@ $provisionerVms = ConvertTo-Array ($provisionerJson | ConvertFrom-Json)
 
 Write-Host "OK - $($provisionerVms.Count) VM(s) in $provisionerSecretName." `
     -ForegroundColor Green
+
+# ---------------------------------------------------------------------------
+# 1b. Router-VM resolution (feature-53 NAT topology)
+#    Workloads in the per-environment private switch are not reachable from
+#    the host directly - the router VM forwards their SSH via MASQUERADE.
+#    Find any router row in the same VmProvisionerConfig batch (kind ==
+#    'router'), discover its upstream IP via Hyper-V KVP, and stamp it as
+#    _RouterVm on each workload so New-VmSshClientWithJump picks the
+#    jump-through-router path for that workload's session.
+#
+#    When no router row is present the batch predates feature 53 (or the
+#    operator deliberately runs a single-switch topology); every workload
+#    keeps the legacy direct-connect path and the join below proceeds as
+#    before.
+# ---------------------------------------------------------------------------
+
+# Import Hyper-V here (not in Install-ModuleDependencies) because Get-VM /
+# Get-VMNetworkAdapter are needed only when a router row is present, and
+# Install-ModuleDependencies runs unconditionally - importing it there
+# would fail on Hyper-V-absent hosts that the no-router path supports.
+$routerVm = $provisionerVms | Where-Object {
+    $_.PSObject.Properties['kind'] -and $_.kind -eq 'router'
+} | Select-Object -First 1
+
+if ($null -ne $routerVm) {
+    Import-Module Hyper-V -ErrorAction Stop
+
+    # Static-mode routers (externalDhcp = false) keep their ipAddress in
+    # the vault; DHCP-mode routers (the schema default) carry it only in
+    # Hyper-V KVP. Discover on demand so both modes work without forking
+    # the call site.
+    if (-not ($routerVm.PSObject.Properties['ipAddress'] -and $routerVm.ipAddress)) {
+        Write-Host "Resolving router '$($routerVm.vmName)' upstream IP via KVP ..." `
+            -NoNewline -ForegroundColor Cyan
+        $routerIp = Get-VmKvpIpAddress `
+                        -VmName     $routerVm.vmName `
+                        -SwitchName $routerVm.externalSwitchName `
+                        -OnPoll     { Write-Host '.' -NoNewline -ForegroundColor Cyan }
+        Add-Member -InputObject $routerVm -MemberType NoteProperty `
+                   -Name 'ipAddress' -Value $routerIp -Force
+        Write-Host " $routerIp" -ForegroundColor Green
+    }
+
+    # Stamp _RouterVm onto every workload (kind != 'router') sharing the
+    # router's privateSwitchName. New-VmSshClientWithJump reads this
+    # property to decide direct-vs-jumped connection without callers
+    # having to thread the router VM explicitly.
+    foreach ($vm in $provisionerVms) {
+        $isRouter = $vm.PSObject.Properties['kind'] -and $vm.kind -eq 'router'
+        if ($isRouter) { continue }
+        $sameEnv = $vm.PSObject.Properties['privateSwitchName'] -and
+                   $vm.privateSwitchName -eq $routerVm.privateSwitchName
+        if (-not $sameEnv) { continue }
+
+        Add-Member -InputObject $vm -MemberType NoteProperty `
+                   -Name '_RouterVm' -Value $routerVm -Force
+    }
+}
 
 # ---------------------------------------------------------------------------
 # 2. Read VmUsersConfig from the VmUsers vault
@@ -131,13 +189,29 @@ Write-Host "Matched $($targets.Count) of $($userEntries.Count) VM entry/entries.
 #    superset of an ICMP ping, since a successful TCP connect implies the
 #    host is up AND has bound port 22. Eliminates the post-reboot race
 #    where ICMP succeeds before sshd binds.
+#
+#    Workloads carrying _RouterVm (feature-53 NAT topology) sit on a
+#    private switch the host has no route to - a direct Test-VmSshPort
+#    would always return $false. Skip the probe for those: the connect
+#    attempt below opens a tunnel + session in one step and surfaces its
+#    own "unreachable" diagnostic when either leg fails, which is the
+#    same information the probe was trying to extract.
 # ---------------------------------------------------------------------------
 
 $reachable = [System.Collections.Generic.List[hashtable]]::new()
 
 foreach ($t in $targets) {
     $name = $t.Entry.vmName
-    $ip   = $t.Provisioner.ipAddress
+    $prov = $t.Provisioner
+    $ip   = $prov.ipAddress
+
+    $hasRouter = $prov.PSObject.Properties['_RouterVm'] -and $prov._RouterVm
+    if ($hasRouter) {
+        Write-Host "[$name] Skipping direct SSH probe (jumped through router)." `
+            -ForegroundColor Cyan
+        $reachable.Add($t)
+        continue
+    }
 
     Write-Host "[$name] Probing SSH ..." -ForegroundColor Cyan
 
@@ -178,30 +252,28 @@ foreach ($t in $reachable) {
     Write-Host "[$name] Connecting as '$($prov.username)' ..." `
         -ForegroundColor Cyan
 
-    # $sshClient is declared before the try so the finally block can always
-    # reference it, even when Connect() throws before the assignment.
-    $sshClient = $null
+    # New-VmSshClientWithJump owns the direct-vs-jump decision:
+    #   - Workload with _RouterVm stamped (feature-53 NAT topology):
+    #     opens SSH to the router, sets up a Renci.SshNet.ForwardedPortLocal
+    #     to the workload's :22, then connects through the loopback
+    #     endpoint. The returned session's Dispose tears the tunnel
+    #     down in the right order.
+    #   - Static / pre-feature-53 caller: direct New-VmSshClient.
+    # Either way callers see a uniform { Client, Tunnel, Dispose() }
+    # shape, so the surrounding flow does not branch on topology.
+    #
+    # Security note: New-VmSshClient (and the jump leg inside the
+    # helper) accepts any host key - same posture as the legacy
+    # direct-SshClient code path this replaced. Acceptable on a
+    # private Hyper-V network with statically provisioned IPs; do NOT
+    # use on untrusted networks.
+    $sshSession = $null
 
     try {
-        # Connect via SSH.NET directly, bypassing Posh-SSH's wrapper.
-        # See the Posh-SSH comment above for why this is necessary.
-        #
-        # Security note: SSH.NET accepts any host key by default (no
-        # HostKeyReceived handler). This is equivalent to Posh-SSH's
-        # -AcceptKey and is acceptable on a private Hyper-V network with
-        # statically provisioned IPs. Do NOT use on untrusted networks.
-        # PasswordAuthenticationMethod requires a plain string. VM passwords
-        # originate as JSON field values (ConvertFrom-Json -> [string]);
-        # converting to SecureString would only require converting back here.
-        $auth      = [Renci.SshNet.PasswordAuthenticationMethod]::new(
-                         $prov.username, $prov.password)
-        $connInfo  = [Renci.SshNet.ConnectionInfo]::new(
-                         $prov.ipAddress, $prov.username, @($auth))
-        $sshClient = [Renci.SshNet.SshClient]::new($connInfo)
-        $sshClient.Connect()
+        $sshSession = New-VmSshClientWithJump -Vm $prov
 
         Invoke-VmUserCreate `
-            -SshClient $sshClient `
+            -SshClient $sshSession.Client `
             -VmName    $name `
             -Entry     $t.Entry
     }
@@ -209,16 +281,19 @@ foreach ($t in $reachable) {
         Write-Error "[$name] SSH connection failed: $($_.Exception.Message)"
     }
     catch [System.Net.Sockets.SocketException] {
-        # "Connection refused" - SSH is not listening on port 22.
-        # The VM is up (ping passed) but sshd may not have started yet.
+        # "Connection refused" - SSH is not listening on port 22 on
+        # the workload (or the router, when jumped). The VM is up
+        # (probe / route succeeded) but sshd may not have started yet.
         Write-Error "[$name] SSH port refused: $($_.Exception.Message)"
     }
     finally {
-        # Always release the TCP connection, even if Connect() or an
-        # operation above threw.
-        if ($null -ne $sshClient) {
-            if ($sshClient.IsConnected) { $sshClient.Disconnect() }
-            $sshClient.Dispose()
+        # Session owns both the workload client AND (when jumped) the
+        # underlying tunnel; Dispose() tears them down in the right
+        # order so the workload session closes before the forwarded
+        # port goes away. Safe to call when $sshSession is $null
+        # (Connect threw before assignment).
+        if ($null -ne $sshSession) {
+            try { $sshSession.Dispose() } catch {}
         }
     }
 }

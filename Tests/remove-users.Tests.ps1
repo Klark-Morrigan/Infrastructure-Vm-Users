@@ -123,6 +123,44 @@ Describe 'remove-users.ps1 - Get-Secret wiring carries the suffix' {
     }
 }
 
+Describe 'remove-users.ps1 - jump-host wiring (feature 53 NAT topology)' {
+
+    # Symmetric to create-users.ps1's jump-host wiring tests. The remove
+    # path is the same shape (resolve router, stamp _RouterVm, connect
+    # via the jump-aware helper) so its regression surface is identical.
+
+    BeforeAll {
+        $script:commandCalls = $script:commands |
+            Where-Object { $null -ne $_.GetCommandName() }
+    }
+
+    It 'calls Get-VmKvpIpAddress to discover the router upstream IP' {
+        $call = $script:commandCalls | Where-Object {
+            $_.GetCommandName() -eq 'Get-VmKvpIpAddress'
+        } | Select-Object -First 1
+        $call | Should -Not -BeNullOrEmpty
+    }
+
+    It 'calls New-VmSshClientWithJump for the per-VM SSH session' {
+        $call = $script:commandCalls | Where-Object {
+            $_.GetCommandName() -eq 'New-VmSshClientWithJump'
+        } | Select-Object -First 1
+        $call | Should -Not -BeNullOrEmpty
+    }
+
+    It 'stamps _RouterVm onto workloads via Add-Member' {
+        # (?s) enables single-line mode so the regex spans the backtick
+        # continuation between `Add-Member` and `-Name '_RouterVm'`.
+        $script:scriptText | Should -Match `
+            "(?s)Add-Member[^']*-Name\s+'_RouterVm'"
+    }
+
+    It 'no longer constructs Renci.SshNet.SshClient directly' {
+        $script:scriptText | Should -Not -Match `
+            '\[Renci\.SshNet\.SshClient\]::new'
+    }
+}
+
 Describe 'remove-users.ps1 - no stale unsuffixed literals' {
 
     BeforeAll {

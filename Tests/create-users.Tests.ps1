@@ -150,6 +150,56 @@ Describe 'create-users.ps1 - Get-Secret wiring carries the suffix' {
     }
 }
 
+Describe 'create-users.ps1 - jump-host wiring (feature 53 NAT topology)' {
+
+    # The host has no route into the per-environment private switch
+    # workloads sit on after feature 53 step 2. The script must (1)
+    # find the router row in VmProvisionerConfig, (2) discover its
+    # upstream IP via KVP, (3) stamp _RouterVm onto every workload in
+    # the same env, and (4) reach workloads via New-VmSshClientWithJump
+    # instead of constructing a Renci.SshNet.SshClient directly. Lock
+    # each leg as a structural check so a future refactor that drops
+    # one of them is caught before the agent first runs.
+
+    BeforeAll {
+        $script:commandCalls = $script:commands |
+            Where-Object { $null -ne $_.GetCommandName() }
+    }
+
+    It 'calls Get-VmKvpIpAddress to discover the router upstream IP' {
+        $call = $script:commandCalls | Where-Object {
+            $_.GetCommandName() -eq 'Get-VmKvpIpAddress'
+        } | Select-Object -First 1
+        $call | Should -Not -BeNullOrEmpty
+    }
+
+    It 'calls New-VmSshClientWithJump for the per-VM SSH session' {
+        $call = $script:commandCalls | Where-Object {
+            $_.GetCommandName() -eq 'New-VmSshClientWithJump'
+        } | Select-Object -First 1
+        $call | Should -Not -BeNullOrEmpty
+    }
+
+    It 'stamps _RouterVm onto workloads via Add-Member' {
+        # Regression guard: New-VmSshClientWithJump decides direct vs
+        # jumped based on this property. If the stamping is dropped,
+        # every workload silently falls back to the direct-connect
+        # branch and times out behind the router. (?s) enables single-
+        # line mode so the regex spans the backtick continuation
+        # between `Add-Member` and `-Name '_RouterVm'`.
+        $script:scriptText | Should -Match `
+            "(?s)Add-Member[^']*-Name\s+'_RouterVm'"
+    }
+
+    It 'no longer constructs Renci.SshNet.SshClient directly' {
+        # Regression guard for a partial revert. The jump-aware helper
+        # owns the SshClient lifetime now; bare construction here would
+        # bypass the jump leg entirely.
+        $script:scriptText | Should -Not -Match `
+            '\[Renci\.SshNet\.SshClient\]::new'
+    }
+}
+
 Describe 'create-users.ps1 - no stale unsuffixed literals' {
 
     # Regression guard for a partial revert. A bare 'VmProvisionerConfig'

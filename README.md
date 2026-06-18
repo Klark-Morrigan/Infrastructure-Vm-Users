@@ -74,7 +74,7 @@ PowerShell 7+ (`pwsh`).
   default for Ubuntu cloud images provisioned with cloud-init (set up
   automatically via `/etc/sudoers.d/90-cloud-init-users`).
 - An internet connection on first run (PSGallery is used to install
-  `PowerShell.Common`, `Infrastructure.Secrets`, and `Posh-SSH`
+  `Common.PowerShell`, `Infrastructure.Secrets`, and `Posh-SSH`
   automatically). Posh-SSH is used as the carrier for its bundled
   SSH.NET library; its own cmdlets are not used directly.
 
@@ -291,14 +291,48 @@ group from each reachable VM. On each run:
 
 CI runs on pull requests targeting `master` via `.github/workflows/ci.yml`,
 which delegates to the shared reusable workflow in
-[PowerShell-Common](https://github.com/VitaliiAndreev/PowerShell-Common):
+[Common-PowerShell](https://github.com/Klark-Morrigan/Common-PowerShell):
 
 ```
-VitaliiAndreev/PowerShell-Common/.github/workflows/ci-powershell.yml@master
+Klark-Morrigan/Common-PowerShell/.github/workflows/ci-powershell.yml@master
 ```
 
 The shared workflow runs `scripts\Run-Tests.ps1` on PowerShell 7.
 No additional CI configuration is needed in this repo.
+
+Two more thin workflows lint the YAML and Bash surfaces by delegating to
+**Common-Automation**, so the lint config is single-sourced and cannot drift
+per repo:
+
+| Workflow | Runs |
+|---|---|
+| `.github/workflows/ci-yaml.yml` | actionlint, action-validator, yamllint, ansible-lint |
+| `.github/workflows/ci-bash.yml` | shellcheck, check-sh-executable, bats |
+
+Each linter auto-skips when its surface is absent. To reproduce the same checks
+locally (Git Bash + Docker), three sibling shim commands map to the CI surface:
+
+```bash
+# MAIN entry: the full local equivalent of ci-yaml.yml + ci-bash.yml -
+# runs the whole lint suite AND the bats tests in one go.
+scripts/run-ci-yaml-and-bash.sh              # or double-click scripts\run-ci-yaml-and-bash.bat
+
+# Run a single half - lint only (shellcheck, actionlint, action-validator,
+# yamllint, ansible-lint). No PowerShell tests; distinct from Run-Tests.ps1.
+scripts/run-lint-yaml-and-bash.sh            # or double-click scripts\run-lint-yaml-and-bash.bat
+
+# Run a single half - the bats tests only.
+scripts/run-tests-bash.sh                    # or double-click scripts\run-tests-bash.bat
+
+# Re-stage the +x bit on tracked *.sh files (Windows checkouts drop it,
+# tripping the check-sh-executable gate).
+scripts/fix-permissions.sh     # or scripts\fix-permissions.bat
+```
+
+All three are thin shims over Common-Automation's engine, pointed at this repo
+via `COMMON_AUTOMATION_TARGET_REPO`, so a sibling checkout at
+`..\Common-Automation` is required. `.gitattributes` pins `*.sh` to LF and
+`*.bat` to CRLF - Linux CI runners reject CRLF shebangs.
 
 ---
 
@@ -306,9 +340,12 @@ No additional CI configuration is needed in this repo.
 
 ```
 Infrastructure-Vm-Users/
+|- .gitattributes           # Pins *.sh to LF and *.bat to CRLF
 |- .github/
 |  `- workflows/
-|     `- ci.yml              # Delegates to shared ci-powershell.yml in PowerShell-Common
+|     |- ci.yml             # Delegates to shared ci-powershell.yml in Common-PowerShell
+|     |- ci-yaml.yml        # Delegates to Common-Automation reusable ci-yaml.yml
+|     `- ci-bash.yml        # Delegates to Common-Automation reusable ci-bash.yml
 |- hyper-v/
 |  `- ubuntu/
 |     |- create-users.ps1    # Entry point - reconciles groups, users, and sudoers
@@ -330,7 +367,13 @@ Infrastructure-Vm-Users/
 |     `- implementation/
 |        |- 01 - initial implementation/
 |        `- 02 - user removal/
-|- Run-Tests.ps1             # Runs Pester unit tests (called by ci-powershell.yml)
+|- scripts/
+|  |- Run-Tests.ps1          # Runs Pester unit tests (called by ci-powershell.yml)
+|  |- Run-IntegrationTests.ps1            # Integration-test runner
+|  |- run-ci-yaml-and-bash.sh / run-ci-yaml-and-bash.bat              # MAIN: full local lint + bats (Common-Automation engine)
+|  |- run-lint-yaml-and-bash.sh / run-lint-yaml-and-bash.bat          # Lint half only (shellcheck, actionlint, yamllint, ...)
+|  |- run-tests-bash.sh / run-tests-bash.bat                          # Bats test half only
+|  `- fix-permissions.sh / fix-permissions.bat  # Re-stage +x on tracked *.sh via the shared engine
 `- README.md
 ```
 

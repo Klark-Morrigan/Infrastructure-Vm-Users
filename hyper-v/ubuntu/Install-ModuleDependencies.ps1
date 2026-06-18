@@ -14,7 +14,7 @@
              Included even though it's idempotent so a cold machine doesn't
              need a separate setup step.
 
-    Step 2 - PowerShell.Common: the chicken-and-egg case. It supplies
+    Step 2 - Common.PowerShell: the chicken-and-egg case. It supplies
              Invoke-ModuleInstall used by every install below, so it cannot
              install itself - the inline guard is unavoidable.
 
@@ -38,8 +38,8 @@ $ErrorActionPreference = 'Stop'
 # ---------------------------------------------------------------------------
 # Install-PowerShellCommonWithRetry
 #   The chicken-and-egg case: Invoke-ModuleInstall (which has retry built
-#   in) lives inside PowerShell.Common, so it cannot be used to install
-#   PowerShell.Common itself. A small inline retry wrapper here covers
+#   in) lives inside Common.PowerShell, so it cannot be used to install
+#   Common.PowerShell itself. A small inline retry wrapper here covers
 #   that single bootstrap call. All later Invoke-ModuleInstall calls below
 #   get retry for free.
 #
@@ -62,7 +62,7 @@ function Install-PowerShellCommonWithRetry {
             # -ErrorAction Stop promotes PSGallery "Unable to resolve
             # package source" (a non-terminating error by default) to a
             # terminating one so the catch block can retry it.
-            Install-Module PowerShell.Common `
+            Install-Module Common.PowerShell `
                 -MinimumVersion $MinimumVersion `
                 -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
             return
@@ -70,7 +70,7 @@ function Install-PowerShellCommonWithRetry {
         catch {
             if ($attempt -ge $MaxAttempts) { throw }
             Write-Warning (
-                "Install-Module PowerShell.Common failed " +
+                "Install-Module Common.PowerShell failed " +
                 "(attempt $attempt/$MaxAttempts): " +
                 "$($_.Exception.Message). Retrying in ${delay}s ..."
             )
@@ -88,28 +88,31 @@ if (-not $_nuget -or $_nuget.Version -lt [Version]'2.8.5.201') {
         -Scope CurrentUser -Force -ForceBootstrap | Out-Null
 }
 
-# Step 2 - PowerShell.Common (chicken-and-egg bootstrap)
-$_common = Get-Module -ListAvailable -Name PowerShell.Common |
+# Step 2 - Common.PowerShell (chicken-and-egg bootstrap)
+$_common = Get-Module -ListAvailable -Name Common.PowerShell |
     Sort-Object Version -Descending | Select-Object -First 1
 if (-not $_common -or $_common.Version -lt [Version]'5.1.0') {
     Install-PowerShellCommonWithRetry -MinimumVersion '6.0.0'
     # Re-query so the comparison below uses the freshly installed version.
-    $_common = Get-Module -ListAvailable -Name PowerShell.Common |
+    $_common = Get-Module -ListAvailable -Name Common.PowerShell |
         Sort-Object Version -Descending | Select-Object -First 1
 }
 # Reload only when the loaded state differs from the target (multiple
 # versions live, or wrong version live). Mirrors the conditional in
 # Invoke-ModuleInstall - inlined here because the bootstrap installs
 # the very module that defines that function.
-$_loaded = @(Get-Module -Name PowerShell.Common)
+$_loaded = @(Get-Module -Name Common.PowerShell)
 if ($_loaded.Count -ne 1 -or $_loaded[0].Version -ne $_common.Version) {
     if ($_loaded) { $_loaded | Remove-Module -Force }
-    Import-Module PowerShell.Common -Force -ErrorAction Stop
+    Import-Module Common.PowerShell -Force -ErrorAction Stop
 }
 
 # Step 3 - Infrastructure.HyperV (SSH execution, host file server,
-# Test-VmSshPort, Wait-VmSshReady)
-Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.3.1'
+# Test-VmSshPort, Wait-VmSshReady, plus the jump-aware New-VmSshClientWithJump
+# / New-VmSshTunnel / Test-SshBanner and the Get-VmKvpIpAddress helper this
+# script uses to find the router for workloads behind a feature-53 NAT
+# topology - all added in 0.11.0).
+Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.11.0'
 
 # Step 4 - Posh-SSH (SSH.NET DLL carrier - see header comment)
 Invoke-ModuleInstall -ModuleName 'Posh-SSH'
