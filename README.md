@@ -291,10 +291,10 @@ group from each reachable VM. On each run:
 
 CI runs on pull requests targeting `master` via `.github/workflows/ci.yml`,
 which delegates to the shared reusable workflow in
-[Common-PowerShell](https://github.com/VitaliiAndreev/Common-PowerShell):
+[Common-PowerShell](https://github.com/Klark-Morrigan/Common-PowerShell):
 
 ```
-VitaliiAndreev/Common-PowerShell/.github/workflows/ci-powershell.yml@master
+Klark-Morrigan/Common-PowerShell/.github/workflows/ci-powershell.yml@master
 ```
 
 The shared workflow runs `scripts\Run-Tests.ps1` on PowerShell 7.
