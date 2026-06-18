@@ -108,8 +108,11 @@ if ($_loaded.Count -ne 1 -or $_loaded[0].Version -ne $_common.Version) {
 }
 
 # Step 3 - Infrastructure.HyperV (SSH execution, host file server,
-# Test-VmSshPort, Wait-VmSshReady)
-Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.3.1'
+# Test-VmSshPort, Wait-VmSshReady, plus the jump-aware New-VmSshClientWithJump
+# / New-VmSshTunnel / Test-SshBanner and the Get-VmKvpIpAddress helper this
+# script uses to find the router for workloads behind a feature-53 NAT
+# topology - all added in 0.11.0).
+Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.11.0'
 
 # Step 4 - Posh-SSH (SSH.NET DLL carrier - see header comment)
 Invoke-ModuleInstall -ModuleName 'Posh-SSH'
