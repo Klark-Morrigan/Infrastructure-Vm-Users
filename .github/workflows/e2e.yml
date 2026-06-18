@@ -3,6 +3,11 @@ name: E2E
 # Calls the shared E2E workflow in Infrastructure-E2E as a required PR check.
 # Always runs the full lifecycle layer - a users change can cascade to break
 # runner registration, so the full stack must be verified.
+#
+# This repo owns the custom-powershell users implementation, so it pins the
+# custom-powershell scenario (both layers) via flow-spec. Without it the
+# shared workflow defaults to the ansible scenario and this repo's
+# create-users.ps1 / remove-users.ps1 would never be exercised on a PR.
 on:
   pull_request:
     branches: [ master ]
@@ -11,3 +16,5 @@ jobs:
   e2e:
     uses: Klark-Morrigan/Infrastructure-E2E/.github/workflows/e2e.yml@master
     secrets: inherit
+    with:
+      flow-spec: '{"usersFlow":"custom-powershell","runnersFlow":"custom-powershell"}'
