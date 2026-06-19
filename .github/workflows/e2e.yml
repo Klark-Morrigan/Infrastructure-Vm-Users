@@ -10,7 +10,6 @@ name: E2E
 # create-users.ps1 / remove-users.ps1 would never be exercised on a PR.
 on:
   pull_request:
-    branches: [ master ]
 
 jobs:
   e2e:

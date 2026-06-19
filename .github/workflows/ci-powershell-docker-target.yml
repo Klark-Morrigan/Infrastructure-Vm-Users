@@ -6,7 +6,6 @@ name: ci-powershell-docker-target
 # Kept as a local file so pull_request triggers work for this repo.
 on:
   pull_request:
-    branches: [ main, master ]
   workflow_call:
   workflow_dispatch:
 
