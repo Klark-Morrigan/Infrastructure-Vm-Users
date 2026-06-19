@@ -1,4 +1,4 @@
-name: ci-powershell
+name: Common-PowerShell
 
 # Delegates to the shared PowerShell CI workflow in Common-PowerShell.
 # Kept as a local file so the pull_request trigger works for this repo,
