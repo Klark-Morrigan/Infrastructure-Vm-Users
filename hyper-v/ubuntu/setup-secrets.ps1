@@ -81,7 +81,7 @@ Initialize-MicrosoftPowerShellSecretStoreVault `
     -Validate {
         param($json)
         $entries = ConvertTo-Array (ConvertFrom-VmUsersConfigJson -Json $json)
-        Write-Host "✓ JSON validated - $($entries.Count) VM entry/entries found." `
+        Write-Host "OK - JSON validated, $($entries.Count) VM entry/entries found." `
             -ForegroundColor Green
     }
 
