@@ -256,7 +256,10 @@ foreach ($t in $reachable) {
     }
     finally {
         if ($null -ne $sshSession) {
-            try { $sshSession.Dispose() } catch {}
+            # Swallow teardown failures at verbose level so a Dispose()
+            # error cannot mask the per-VM outcome reported above.
+            try { $sshSession.Dispose() }
+            catch { Write-Verbose "[$name] Dispose() failed during cleanup: $($_.Exception.Message)" }
         }
     }
 }

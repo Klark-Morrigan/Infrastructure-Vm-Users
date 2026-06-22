@@ -293,7 +293,10 @@ foreach ($t in $reachable) {
         # port goes away. Safe to call when $sshSession is $null
         # (Connect threw before assignment).
         if ($null -ne $sshSession) {
-            try { $sshSession.Dispose() } catch {}
+            # Swallow teardown failures at verbose level so a Dispose()
+            # error cannot mask the per-VM outcome reported above.
+            try { $sshSession.Dispose() }
+            catch { Write-Verbose "[$name] Dispose() failed during cleanup: $($_.Exception.Message)" }
         }
     }
 }
