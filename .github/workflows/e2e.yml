@@ -1,4 +1,4 @@
-name: E2E
+name: Infrastructure-E2E
 
 # Calls the shared E2E workflow in Infrastructure-E2E as a required PR check.
 # Always runs the full lifecycle layer - a users change can cascade to break
@@ -10,7 +10,6 @@ name: E2E
 # create-users.ps1 / remove-users.ps1 would never be exercised on a PR.
 on:
   pull_request:
-    branches: [ master ]
 
 jobs:
   e2e:

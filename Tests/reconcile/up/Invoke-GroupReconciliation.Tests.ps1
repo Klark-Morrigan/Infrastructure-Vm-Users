@@ -1,3 +1,12 @@
+# PSAvoidUsingPositionalParameters is suppressed file-wide: the BeforeAll
+# block defines local test-double factories (New-SshResult, New-User, ...)
+# whose positional call sites are the idiomatic, readable form in this
+# suite, not a real cmdlet-argument hazard.
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+    'PSAvoidUsingPositionalParameters', '',
+    Justification = 'Positional calls to local test-double factories are idiomatic here')]
+param()
+
 BeforeAll {
     # Stub Invoke-SshClientCommand before dot-sourcing so the function reference
     # resolves at load time. Tests override it per-context with Mock.

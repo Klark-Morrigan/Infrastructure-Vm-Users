@@ -79,7 +79,7 @@ function Invoke-UserReconciliation {
             # Primary group pre-exists - adopt it explicitly.
             $cmd += " -g '$primaryGroupName'"
         } # else: primary group absent - useradd creates it automatically.
-        
+
         if ($groups.Count -gt 0) {
             $cmd += " -G '$($groups -join ',')'"
         }
