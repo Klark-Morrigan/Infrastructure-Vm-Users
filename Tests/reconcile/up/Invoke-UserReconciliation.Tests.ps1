@@ -1,3 +1,12 @@
+# PSAvoidUsingPositionalParameters is suppressed file-wide: the BeforeAll
+# block defines local test-double factories (New-SshResult, New-User, ...)
+# whose positional call sites are the idiomatic, readable form in this
+# suite, not a real cmdlet-argument hazard.
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+    'PSAvoidUsingPositionalParameters', '',
+    Justification = 'Positional calls to local test-double factories are idiomatic here')]
+param()
+
 BeforeAll {
     function Invoke-SshClientCommand { param($SshClient, $Command, $ErrorAction) }
 
@@ -8,6 +17,16 @@ BeforeAll {
     }
 
     function New-User {
+        # This is an in-memory test double that mirrors the JSON user
+        # schema (username + optional plaintext password field); it builds
+        # no credential and touches no system, so the paired-credential and
+        # plaintext-password rules do not apply.
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+            'PSAvoidUsingUsernameAndPasswordParams', '',
+            Justification = 'Test double mirroring the config schema, builds no credential')]
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+            'PSAvoidUsingPlainTextForPassword', 'Password',
+            Justification = 'Test double mirroring the config schema, builds no credential')]
         param(
             [string]   $Username,
             [string]   $Shell    = '/bin/bash',
