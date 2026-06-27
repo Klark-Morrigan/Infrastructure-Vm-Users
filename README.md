@@ -1,10 +1,10 @@
 # Infrastructure-Vm-Users
 
 > **Notice:** This repo is no longer the operator default;
-> [Infrastructure-VM-Ansible] is. The PowerShell scripts here remain
+> [Common-Ansible] is. The PowerShell scripts here remain
 > callable and back the Infrastructure-E2E `custom-powershell` users
 > flow as a non-primary first-class implementation. The canonical home
-> of the migrated logic is under [Infrastructure-VM-Ansible]'s
+> of the migrated logic is under [Common-Ansible]'s
 > `docs/dev/implementation/02-...` (create direction) and `03-...`
 > (remove direction) folders.
 
@@ -377,5 +377,5 @@ Infrastructure-Vm-Users/
 `- README.md
 ```
 
-[Infrastructure-VM-Ansible]: ../Infrastructure-VM-Ansible
+[Common-Ansible]: ../Common-Ansible
 [Infrastructure-Vm-Provisioner]: ../Infrastructure-Vm-Provisioner
