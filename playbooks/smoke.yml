@@ -1,0 +1,20 @@
+---
+# Smoke playbook for the Common-Ansible scoped-checkout consumption (feature
+# 19, step 3.1). It references a substrate role by its short name; the role
+# resolves only when ANSIBLE_ROLES_PATH includes the Common-Ansible sibling's
+# roles/ (resolved via ops/imports/_common-ansible-root.sh). A green
+# `ansible-playbook --syntax-check` proves the scoped checkout resolves the
+# substrate roles from this consumer repo; without the sibling on the roles
+# path it fails with "the role 'groups' was not found".
+#
+# This is a resolution proof, not an execution run: the substrate roles
+# mutate a target host and read the bridge's extra-vars contract, so their
+# behaviour is exercised by molecule/integration, not a controller-side
+# smoke. `groups` also pulls in the `vm_users_entry` meta-dependency, so a
+# green check proves sibling role + in-repo meta-dep resolution together.
+- name: Common-Ansible consumption smoke
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - groups

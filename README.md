@@ -21,6 +21,7 @@ state stored in a local encrypted vault.
 - [Config reference](#config-reference)
 - [Reconciliation behaviour](#reconciliation-behaviour)
 - [Removal](#removal)
+- [Consuming Common-Ansible](#consuming-common-ansible)
 - [CI](#ci)
 - [Repo structure](#repo-structure)
 
@@ -287,6 +288,69 @@ group from each reachable VM. On each run:
 
 ---
 
+## Consuming Common-Ansible
+
+The Ansible migration of the user domain (feature 19) moves the user
+roles and playbooks into this repo, where they consume
+[Common-Ansible] as shared substrate rather than re-implementing the
+controller. This section documents the reuse path that step 3.1
+establishes; the roles and operator playbooks themselves land in a
+later step.
+
+Common-Ansible is consumed as a **single sibling checkout**. Its roles
+are not standalone - they read the dispatch bridge's extra-vars and
+inventory contract - so the roles and the bridge are one substrate and
+are taken together from one checked-out root, not split across
+transports (a Galaxy collection was rejected for that reason; see
+[Common-Ansible]'s README). The substrate root is resolved once by
+[`ops/imports/_common-ansible-root.sh`](ops/imports/_common-ansible-root.sh)
+(the same adapter pattern the lint shims use for Common-Automation),
+overridable with `COMMON_ANSIBLE_ROOT`:
+
+| What is reused | How it is reached |
+|---|---|
+| Reusable **roles** | `<root>/roles` added to `ANSIBLE_ROLES_PATH`; referenced by short name (e.g. `groups`) |
+| The **controller + ops bridge** | `<root>/.venv` controller and `<root>/ops/` scripts, run in place |
+
+### Bootstrap
+
+```bash
+# From WSL (or double-click ops\bootstrap-controller.bat on Windows):
+ops/bootstrap-controller.sh
+```
+
+[`ops/bootstrap-controller.sh`](ops/bootstrap-controller.sh) is thin: it
+locates the Common-Ansible sibling (override with `COMMON_ANSIBLE_ROOT`)
+and makes sure the shared controller is built, delegating to
+Common-Ansible's own bootstrap when its venv is absent. There is nothing
+to install for this repo - reusing the substrate controller instead of
+forking it is the whole point of the Common- split.
+
+### Smoke check
+
+[`playbooks/smoke.yml`](playbooks/smoke.yml) references a substrate role
+by its short name (`groups`). With the sibling's roles on the path:
+
+```bash
+ANSIBLE_ROLES_PATH="../Common-Ansible/roles" \
+  ansible-playbook --syntax-check playbooks/smoke.yml -i localhost,
+```
+
+A green check proves the scoped checkout resolves the substrate roles
+from this repo (without the sibling on the roles path it fails with "the
+role 'groups' was not found"). It is a resolution proof, not an execution
+run - the substrate roles mutate a target host, so their behaviour is
+exercised by molecule and integration tests, not a controller-side smoke.
+
+### Prerequisite
+
+A Common-Ansible sibling checkout under the same parent (e.g.
+`..\Common-Ansible`) supplies both the controller/ops bridge and the
+roles. Merge substrate changes to Common-Ansible's `master` before the
+consumer relies on them.
+
+---
+
 ## CI
 
 CI runs on pull requests targeting `master` via `.github/workflows/ci.yml`,
@@ -346,6 +410,13 @@ Infrastructure-Vm-Users/
 |     |- ci.yml             # Delegates to shared ci-powershell.yml in Common-PowerShell
 |     |- ci-yaml.yml        # Delegates to Common-Automation reusable ci-yaml.yml
 |     `- ci-bash.yml        # Delegates to Common-Automation reusable ci-bash.yml
+|- ops/
+|  |- imports/
+|  |  `- _common-ansible-root.sh # Resolves the Common-Ansible sibling root (roles + bridge)
+|  |- bootstrap-controller.sh   # Consumer controller bootstrap: reuse the substrate controller
+|  `- bootstrap-controller.bat  # Explorer launcher (runs the .sh via WSL)
+|- playbooks/
+|  `- smoke.yml             # Resolves a substrate role by short name (consumption smoke check)
 |- hyper-v/
 |  `- ubuntu/
 |     |- create-users.ps1    # Entry point - reconciles groups, users, and sudoers
