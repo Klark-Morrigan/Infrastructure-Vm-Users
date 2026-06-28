@@ -290,12 +290,15 @@ group from each reachable VM. On each run:
 
 ## Consuming Common-Ansible
 
-The Ansible migration of the user domain (feature 19) moves the user
-roles and playbooks into this repo, where they consume
+The Ansible migration of the user domain (feature 19) places the user
+roles, playbooks, and operator wrappers in this repo, where they consume
 [Common-Ansible] as shared substrate rather than re-implementing the
-controller. This section documents the reuse path that step 3.1
-establishes; the roles and operator playbooks themselves land in a
-later step.
+controller. The reusable roles (`groups`, `users`, `sudoers`, and the
+`vm_users_entry` fact helper) live under [`roles/`](roles/), the
+operator playbooks under [`playbooks/`](playbooks/) (shared posture in
+[`docs/dev/playbook-conventions.md`](docs/dev/playbook-conventions.md)),
+and the Ansible operator wrappers under [`ops/`](ops/). This section
+documents the reuse path that makes them work.
 
 Common-Ansible is consumed as a **single sibling checkout**. Its roles
 are not standalone - they read the dispatch bridge's extra-vars and
@@ -325,6 +328,33 @@ and makes sure the shared controller is built, delegating to
 Common-Ansible's own bootstrap when its venv is absent. There is nothing
 to install for this repo - reusing the substrate controller instead of
 forking it is the whole point of the Common- split.
+
+### Running the create / remove user flows
+
+The Ansible flows are operator wrappers that declare what they need to
+the substrate bridge and dispatch a repo-local playbook through it:
+
+```bash
+# Reconcile groups, users, and sudoers on every provisioned VM:
+SECRET_SUFFIX=Production ops/create-users.sh        # or ops\create-users.bat
+
+# Remove sudoers, users, and groups (reverse order):
+SECRET_SUFFIX=Production ops/remove-users.sh        # or ops\remove-users.bat
+```
+
+| Concern | Where it is handled |
+|---|---|
+| Vault / inventory / dispatch | The substrate bridge (`ops/_run-playbook.sh` in [Common-Ansible]), located via the root resolver |
+| Which vaults to read | Declared by the wrapper via the `CA_*` contract (`CA_INVENTORY_VAULT=VmProvisioner`, `CA_EXTRA_VAULTS=VmUsers`) |
+| Which lifecycle's secrets | `SECRET_SUFFIX` (e.g. `Production`) - required by the bridge; the wrapper does not default it |
+| The user roles | `groups`, `users`, `sudoers` (and the `vm_users_entry` fact helper) under [`roles/`](roles/) |
+| User extra-vars fragment | [`ops/_build-extra-vars-users.sh`](ops/_build-extra-vars-users.sh) emits `vm_users_config` for the substrate composer |
+
+Forwarded arguments follow the bridge's playbook path, so `--tags`,
+`--limit <vm>`, `--check`, and `-v` pass straight through to
+`ansible-playbook`. The roles are covered by the molecule scenarios
+under [`Tests/molecule/`](Tests/molecule/) (Docker driver, one
+`default` and one `remove` scenario per role).
 
 ### Smoke check
 
@@ -410,13 +440,26 @@ Infrastructure-Vm-Users/
 |     |- ci.yml             # Delegates to shared ci-powershell.yml in Common-PowerShell
 |     |- ci-yaml.yml        # Delegates to Common-Automation reusable ci-yaml.yml
 |     `- ci-bash.yml        # Delegates to Common-Automation reusable ci-bash.yml
+|- requirements.yml         # Galaxy collections for the roles (used by molecule + bootstrap)
 |- ops/
 |  |- imports/
 |  |  `- _common-ansible-root.sh # Resolves the Common-Ansible sibling root (roles + bridge)
 |  |- bootstrap-controller.sh   # Consumer controller bootstrap: reuse the substrate controller
-|  `- bootstrap-controller.bat  # Explorer launcher (runs the .sh via WSL)
+|  |- bootstrap-controller.bat  # Explorer launcher (runs the .sh via WSL)
+|  |- create-users.sh / create-users.bat # Ansible create-users wrapper (dispatches the substrate bridge)
+|  |- remove-users.sh / remove-users.bat # Ansible remove-users wrapper (dispatches the substrate bridge)
+|  `- _build-extra-vars-users.sh # User-domain extra-vars fragment (emits vm_users_config)
+|- roles/                   # Reusable user roles, consumed by short name via the substrate
+|  |- vm_users_entry/        # Sets the per-host vm_users_entry fact (meta-dep of the others)
+|  |- groups/               # Reconcile / remove declared OS groups
+|  |- users/                # Reconcile / remove declared OS users
+|  `- sudoers/              # Reconcile / remove /etc/sudoers.d drop-ins
 |- playbooks/
-|  `- smoke.yml             # Resolves a substrate role by short name (consumption smoke check)
+|  |- smoke.yml             # Resolves a substrate role by short name (consumption smoke check)
+|  |- create-users.yml      # groups -> users -> sudoers against provisioned VMs
+|  |- remove-users.yml      # sudoers -> users -> groups (reverse)
+|  `- tasks/
+|     `- _ensure-acl-present.yml # Installs acl for unprivileged become (shared host prereq)
 |- hyper-v/
 |  `- ubuntu/
 |     |- create-users.ps1    # Entry point - reconciles groups, users, and sudoers
@@ -427,6 +470,10 @@ Infrastructure-Vm-Users/
 |        |- up/              # User creation and reconciliation
 |        `- down/            # User removal
 |- Tests/
+|  |- molecule/              # Molecule scenarios for the Ansible roles (Docker driver)
+|  |  |- groups/             # default + remove scenarios
+|  |  |- users/              # default + remove scenarios
+|  |  `- sudoers/            # default + remove scenarios
 |  |- reconcile/
 |  |  |- common/             # Unit tests for reconcile/common
 |  |  |- up/                 # Unit tests for reconcile/up
@@ -435,6 +482,7 @@ Infrastructure-Vm-Users/
 |     `- Reconcile.Tests.ps1 # All integration tests (groups, users, sudoers, removal)
 |- docs/
 |  `- dev/
+|     |- playbook-conventions.md # Shared posture for the user playbooks
 |     `- implementation/
 |        |- 01 - initial implementation/
 |        `- 02 - user removal/
