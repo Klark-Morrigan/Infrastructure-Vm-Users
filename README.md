@@ -312,8 +312,17 @@ overridable with `COMMON_ANSIBLE_ROOT`:
 
 | What is reused | How it is reached |
 |---|---|
-| Reusable **roles** | `<root>/roles` added to `ANSIBLE_ROLES_PATH`; referenced by short name (e.g. `groups`) |
 | The **controller + ops bridge** | `<root>/.venv` controller and `<root>/ops/` scripts, run in place |
+| Any reusable **substrate roles** | `<root>/roles` is appended to `ANSIBLE_ROLES_PATH`, so a playbook can reference a substrate role by short name |
+
+This repo's **own** user roles, playbook, and extra-vars fragment are
+not reused from the substrate - they live here. The wrappers surface
+them to the bridge by declaring `CA_CONSUMER_ROOT` (this repo's root):
+the bridge then resolves the playbook from here, puts this repo's
+`roles/` **ahead of** the substrate `roles/` on `ANSIBLE_ROLES_PATH`
+(so `groups` / `users` / `sudoers` resolve to this repo by short name),
+and resolves the user extra-vars fragment from this repo's `ops/`. The
+substrate carries no user domain; this repo owns it whole.
 
 ### Bootstrap
 
@@ -346,9 +355,10 @@ SECRET_SUFFIX=Production ops/remove-users.sh        # or ops\remove-users.bat
 |---|---|
 | Vault / inventory / dispatch | The substrate bridge (`ops/_run-playbook.sh` in [Common-Ansible]), located via the root resolver |
 | Which vaults to read | Declared by the wrapper via the `CA_*` contract (`CA_INVENTORY_VAULT=VmProvisioner`, `CA_EXTRA_VAULTS=VmUsers`) |
+| Where the playbook / roles / fragment live | Declared by the wrapper as `CA_CONSUMER_ROOT` (this repo's root); the bridge resolves all three from here |
 | Which lifecycle's secrets | `SECRET_SUFFIX` (e.g. `Production`) - required by the bridge; the wrapper does not default it |
-| The user roles | `groups`, `users`, `sudoers` (and the `vm_users_entry` fact helper) under [`roles/`](roles/) |
-| User extra-vars fragment | [`ops/_build-extra-vars-users.sh`](ops/_build-extra-vars-users.sh) emits `vm_users_config` for the substrate composer |
+| The user roles | `groups`, `users`, `sudoers` (and the `vm_users_entry` fact helper) under [`roles/`](roles/), put ahead of the substrate `roles/` on the path |
+| User extra-vars fragment | [`ops/_build-extra-vars-users.sh`](ops/_build-extra-vars-users.sh) emits `vm_users_config`; the substrate composer dispatches to it from `CA_CONSUMER_ROOT/ops` |
 
 Forwarded arguments follow the bridge's playbook path, so `--tags`,
 `--limit <vm>`, `--check`, and `-v` pass straight through to

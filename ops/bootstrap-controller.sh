@@ -11,15 +11,17 @@
 # The bootstrap is thin: it (1) locates the substrate sibling and (2) makes
 # sure the shared controller (the venv + ansible-core + substrate collections
 # that Common-Ansible's own bootstrap builds) exists, reusing it rather than
-# forking it. There is nothing to install for this repo - roles resolve at
-# play time via ANSIBLE_ROLES_PATH pointing at the sibling's roles/ (the flow
-# wrappers set it; see the README).
+# forking it. There is nothing to install for this repo - the user roles
+# live in this repo's roles/ and resolve at play time: the flow wrappers
+# declare CA_CONSUMER_ROOT and the substrate bridge puts this repo's roles/
+# ahead of the substrate's on ANSIBLE_ROLES_PATH (see the README).
 set -euo pipefail
 
 # Anchor to this script's directory via parameter expansion (not dirname) so
 # it works regardless of the caller's working directory and even on a
 # locked-down PATH.
 script_dir="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
 
 # Locate the substrate sibling (override with COMMON_ANSIBLE_ROOT).
 # shellcheck source=ops/imports/_common-ansible-root.sh
@@ -50,4 +52,4 @@ echo ""
 echo "Consumer controller bootstrap complete:"
 echo "  Substrate sibling : ${common_ansible_root}"
 echo "  Controller venv   : ${common_ansible_root}/.venv"
-echo "  Roles resolve via : ANSIBLE_ROLES_PATH -> ${common_ansible_root}/roles"
+echo "  Roles resolve via : ANSIBLE_ROLES_PATH -> ${repo_root}/roles then ${common_ansible_root}/roles"

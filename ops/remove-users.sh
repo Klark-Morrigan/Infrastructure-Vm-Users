@@ -15,15 +15,22 @@
 # No confirmation prompt: the destructive intent lives in the script
 # name and in the operator's choice to invoke it.
 #
-# The playbook path is given relative to the substrate root because the
-# bridge resolves both the playbook and the user roles
-# (groups/users/sudoers) from that root.
+# This repo owns the remove-users playbook and the user roles
+# (groups/users/sudoers), so it declares CA_CONSUMER_ROOT as its own repo
+# root. The bridge then resolves the playbook, those roles, and the VmUsers
+# extra-vars fragment from here rather than from the substrate. The playbook
+# path is given relative to that consumer root.
 set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# This repo's root (ops/ -> repo root): the consumer root the bridge
+# resolves the playbook, roles, and fragment from.
+CA_CONSUMER_ROOT="$(cd "${script_dir}/.." && pwd)"
 
 export CA_INVENTORY_VAULT=VmProvisioner
 export CA_EXTRA_VAULTS=VmUsers
+export CA_CONSUMER_ROOT
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=ops/imports/_common-ansible-root.sh
 source "${script_dir}/imports/_common-ansible-root.sh"
 
