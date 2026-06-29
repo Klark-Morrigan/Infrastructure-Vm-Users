@@ -442,6 +442,16 @@ via `COMMON_AUTOMATION_TARGET_REPO`, so a sibling checkout at
 
 ## Repo structure
 
+This repo carries **two user-provisioning implementations** plus the secret
+store they share. The top-level directories group by that split:
+
+| Bucket | Directories |
+|---|---|
+| **PowerShell impl** | `hyper-v/` (entry points + `reconcile/` logic), `Tests/hyper-v/` |
+| **Ansible impl** (Common-Ansible consumer) | `roles/`, `playbooks/`, `ops/`, `requirements.yml`, `Tests/molecule` |
+| **Shared** | the local SecretStore vault, set up by `hyper-v/ubuntu/setup-secrets.ps1` and read by both impls |
+| **Tooling** | `.github/`, `scripts/`, `.gitattributes`, `docs/` |
+
 ```
 Infrastructure-Vm-Users/
 |- .gitattributes           # Pins *.sh to LF and *.bat to CRLF
@@ -479,17 +489,17 @@ Infrastructure-Vm-Users/
 |        |- common/          # Shared between create and remove
 |        |- up/              # User creation and reconciliation
 |        `- down/            # User removal
-|- Tests/
-|  |- molecule/              # Molecule scenarios for the Ansible roles (Docker driver)
-|  |  |- groups/             # default + remove scenarios
-|  |  |- users/              # default + remove scenarios
-|  |  `- sudoers/            # default + remove scenarios
-|  |- reconcile/
-|  |  |- common/             # Unit tests for reconcile/common
-|  |  |- up/                 # Unit tests for reconcile/up
-|  |  `- down/               # Unit tests for reconcile/down
-|  `- Integration/           # Integration tests - one shared SSH session for all reconciliation
-|     `- Reconcile.Tests.ps1 # All integration tests (groups, users, sudoers, removal)
+|- Tests/                    # Split by impl, mirroring the production layout
+|  |- hyper-v/               # PowerShell-impl tests (mirror hyper-v/)
+|  |  |- reconcile/          # Unit tests for reconcile/{common,up,down}
+|  |  |  |- common/  |- up/  `- down/
+|  |  |- Integration.DockerHost/ # Integration tests - one shared SSH session (Docker)
+|  |  |  `- Reconcile.Tests.ps1  # All integration tests (groups, users, sudoers, removal)
+|  |  `- create-users.Tests.ps1 / remove-users.Tests.ps1 / setup-secrets.Tests.ps1
+|  `- molecule/              # Ansible-impl: molecule scenarios for the roles (Docker driver)
+|     |- groups/             # default + remove scenarios
+|     |- users/              # default + remove scenarios
+|     `- sudoers/            # default + remove scenarios
 |- docs/
 |  `- dev/
 |     |- playbook-conventions.md # Shared posture for the user playbooks

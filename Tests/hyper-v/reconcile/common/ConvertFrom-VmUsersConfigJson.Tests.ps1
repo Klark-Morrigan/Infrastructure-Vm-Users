@@ -15,7 +15,7 @@ BeforeAll {
         , @($InputObject)
     }
 
-    . "$PSScriptRoot\..\..\..\hyper-v\ubuntu\reconcile\common\ConvertFrom-VmUsersConfigJson.ps1"
+    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\reconcile\common\ConvertFrom-VmUsersConfigJson.ps1"
 
     # Builds a minimal valid VM entry with all required fields populated.
     # Individual tests override specific fields as needed.

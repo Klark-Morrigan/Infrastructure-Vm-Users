@@ -7,7 +7,7 @@
 BeforeAll {
     . "$PSScriptRoot\Initialize-DockerHostEnvironment.ps1"
 
-    $src = [IO.Path]::Combine($PSScriptRoot, '..', '..', 'hyper-v', 'ubuntu', 'reconcile')
+    $src = [IO.Path]::Combine($PSScriptRoot, '..', '..', '..', 'hyper-v', 'ubuntu', 'reconcile')
     . ([IO.Path]::Combine($src, 'up', 'Invoke-GroupReconciliation.ps1'))
     . ([IO.Path]::Combine($src, 'up', 'Invoke-SudoersReconciliation.ps1'))
     . ([IO.Path]::Combine($src, 'up', 'Invoke-UserReconciliation.ps1'))

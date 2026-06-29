@@ -3,7 +3,7 @@ BeforeAll {
     function Remove-VmSudoers { param($SshClient, $VmName, $User) }
     function Remove-VmUsers   { param($SshClient, $VmName, $User) }
 
-    . "$PSScriptRoot\..\..\..\hyper-v\ubuntu\reconcile\down\Invoke-VmUserRemove.ps1"
+    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\reconcile\down\Invoke-VmUserRemove.ps1"
 
     $Script:FakeSsh = [PSCustomObject] @{}
 

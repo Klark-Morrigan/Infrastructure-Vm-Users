@@ -28,7 +28,7 @@
 #>
 
 BeforeAll {
-    $script:scriptPath = Join-Path $PSScriptRoot '..\hyper-v\ubuntu\create-users.ps1'
+    $script:scriptPath = Join-Path $PSScriptRoot '..\..\hyper-v\ubuntu\create-users.ps1'
     $script:scriptText = Get-Content -LiteralPath $script:scriptPath -Raw
 
     $tokens    = $null

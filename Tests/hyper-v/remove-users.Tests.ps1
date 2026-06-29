@@ -10,7 +10,7 @@
 #>
 
 BeforeAll {
-    $script:scriptPath = Join-Path $PSScriptRoot '..\hyper-v\ubuntu\remove-users.ps1'
+    $script:scriptPath = Join-Path $PSScriptRoot '..\..\hyper-v\ubuntu\remove-users.ps1'
     $script:scriptText = Get-Content -LiteralPath $script:scriptPath -Raw
 
     $tokens    = $null

@@ -10,7 +10,7 @@ param()
 BeforeAll {
     function Invoke-SshClientCommand { param($SshClient, $Command, $ErrorAction) }
 
-    . "$PSScriptRoot\..\..\..\hyper-v\ubuntu\reconcile\down\Remove-VmSudoers.ps1"
+    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\reconcile\down\Remove-VmUsers.ps1"
 
     function New-SshResult([int] $ExitStatus, [string[]] $Output = @(), [string] $Err = '') {
         [PSCustomObject] @{ ExitStatus = $ExitStatus; Output = $Output; Error = $Err }
@@ -21,46 +21,44 @@ BeforeAll {
     }
 }
 
-Describe 'Remove-VmSudoers' {
+Describe 'Remove-VmUsers' {
 
-    Context 'sudoers file exists' {
-        It 'issues the rm command' {
+    Context 'user exists' {
+        It 'issues userdel -r' {
             Mock Invoke-SshClientCommand {
-                if ($Command -like '*test -f*') { New-SshResult 0 @('exists') }
-                else                            { New-SshResult 0 }
+                if ($Command -like 'id*') { New-SshResult 0 }
+                else                      { New-SshResult 0 }
             }
 
-            Remove-VmSudoers -SshClient ([PSCustomObject] @{}) -VmName 'node-01' `
+            Remove-VmUsers -SshClient ([PSCustomObject] @{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy')
 
             Should -Invoke Invoke-SshClientCommand -Times 1 -Exactly -ParameterFilter {
-                $Command -like "*rm '/etc/sudoers.d/u-deploy'*"
+                $Command -like "*userdel -r 'u-deploy'*"
             }
         }
 
-        It 'throws when rm fails' {
+        It 'throws when userdel fails' {
             Mock Invoke-SshClientCommand {
-                if ($Command -like '*test -f*') { New-SshResult 0 @('exists') }
-                else                            { New-SshResult 1 @() 'permission denied' }
+                if ($Command -like 'id*') { New-SshResult 0 }
+                else                      { New-SshResult 1 @() 'permission denied' }
             }
 
-            { Remove-VmSudoers -SshClient ([PSCustomObject] @{}) -VmName 'node-01' `
+            { Remove-VmUsers -SshClient ([PSCustomObject] @{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy') } |
-                Should -Throw -ExpectedMessage '*Failed to remove sudoers*'
+                Should -Throw -ExpectedMessage '*userdel failed*'
         }
     }
 
-    Context 'sudoers file absent' {
-        It 'does not issue rm and does not throw' {
-            Mock Invoke-SshClientCommand {
-                New-SshResult 0 @('absent')
-            }
+    Context 'user absent' {
+        It 'does not issue userdel and does not throw' {
+            Mock Invoke-SshClientCommand { New-SshResult 1 }
 
-            { Remove-VmSudoers -SshClient ([PSCustomObject] @{}) -VmName 'node-01' `
+            { Remove-VmUsers -SshClient ([PSCustomObject] @{}) -VmName 'node-01' `
                 -User (New-User 'u-deploy') } | Should -Not -Throw
 
             Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
-                $Command -like '*rm*'
+                $Command -like '*userdel*'
             }
         }
     }
