@@ -24,7 +24,7 @@ script_dir="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 
 # Locate the substrate sibling (override with COMMON_ANSIBLE_ROOT).
-# shellcheck source=ops/imports/_common-ansible-root.sh
+# shellcheck source=hyper-v/ubuntu/Ansible/ops/imports/_common-ansible-root.sh
 source "${script_dir}/imports/_common-ansible-root.sh"
 
 venv_python="${common_ansible_root}/.venv/bin/python"

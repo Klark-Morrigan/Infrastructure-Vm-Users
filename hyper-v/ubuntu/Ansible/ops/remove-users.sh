@@ -31,7 +31,7 @@ export CA_INVENTORY_VAULT=VmProvisioner
 export CA_EXTRA_VAULTS=VmUsers
 export CA_CONSUMER_ROOT
 
-# shellcheck source=ops/imports/_common-ansible-root.sh
+# shellcheck source=hyper-v/ubuntu/Ansible/ops/imports/_common-ansible-root.sh
 source "${script_dir}/imports/_common-ansible-root.sh"
 
 exec "${common_ansible_root}/ops/_run-playbook.sh" playbooks/remove-users.yml "$@"
