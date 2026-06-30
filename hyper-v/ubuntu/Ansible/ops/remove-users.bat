@@ -16,7 +16,7 @@ rem
 rem We hold the window open here with `pause` so Explorer-click users
 rem can read the play recap; the .sh itself stays quiet on exit.
 
-call "%~dp0..\..\Common-Automation\scripts\_find-bash.bat" || exit /b 1
+call "%~dp0..\..\..\..\..\Common-Automation\scripts\_find-bash.bat" || exit /b 1
 
 "%BASH%" "%~dp0remove-users.sh" %*
 set rc=%errorlevel%

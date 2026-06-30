@@ -12,7 +12,7 @@ BeforeAll {
     # resolves at load time. Tests override it per-context with Mock.
     function Invoke-SshClientCommand { param($SshClient, $Command, $ErrorAction) }
 
-    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\reconcile\up\Invoke-GroupReconciliation.ps1"
+    . "$PSScriptRoot\..\..\..\reconcile\up\Invoke-GroupReconciliation.ps1"
 
     # Builds a fake Invoke-SshClientCommand result.
     #   -ExitStatus 0  : command succeeded (group found / operation ok)

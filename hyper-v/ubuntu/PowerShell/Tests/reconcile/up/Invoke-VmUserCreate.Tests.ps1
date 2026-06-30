@@ -3,7 +3,7 @@ BeforeAll {
     function Invoke-SudoersReconciliation { param($SshClient, $VmName, $User) }
     function Invoke-UserReconciliation    { param($SshClient, $VmName, $User) }
 
-    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\reconcile\up\Invoke-VmUserCreate.ps1"
+    . "$PSScriptRoot\..\..\..\reconcile\up\Invoke-VmUserCreate.ps1"
 
     $Script:FakeSsh = [PSCustomObject] @{}
 

@@ -10,7 +10,7 @@ param()
 BeforeAll {
     function Invoke-SshClientCommand { param($SshClient, $Command, $ErrorAction) }
 
-    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\reconcile\up\Invoke-SudoersReconciliation.ps1"
+    . "$PSScriptRoot\..\..\..\reconcile\up\Invoke-SudoersReconciliation.ps1"
 
     function New-SshResult([int] $ExitStatus, [string[]] $Output = @(), [string] $Err = '') {
         [PSCustomObject]@{ ExitStatus = $ExitStatus; Output = $Output; Error = $Err }

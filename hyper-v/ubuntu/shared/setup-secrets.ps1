@@ -63,7 +63,7 @@ $ErrorActionPreference = 'Stop'
 # ConvertFrom-VmUsersConfigJson.ps1 is dot-sourced after the modules are
 # loaded. It only calls Assert-RequiredProperties inside function bodies,
 # not at load time, so this ordering is safe.
-. "$PSScriptRoot\reconcile\common\ConvertFrom-VmUsersConfigJson.ps1"
+. "$PSScriptRoot\..\PowerShell\reconcile\common\ConvertFrom-VmUsersConfigJson.ps1"
 
 # Forward the secret-store cmdlet only the params it knows about; Suffix
 # is consumed locally to build SecretName and must not be splatted.

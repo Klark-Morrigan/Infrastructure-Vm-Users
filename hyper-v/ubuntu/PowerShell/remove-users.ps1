@@ -1,13 +1,15 @@
 <#
 .SYNOPSIS
-    Reconciles OS users on Ubuntu VMs against the desired state in the
-    VmUsers vault.
+    Removes OS users provisioned by create-users.ps1 from Ubuntu VMs.
 
 .DESCRIPTION
     Reads VM connection details (IP, admin credentials) from the existing
     VmProvisioner vault and the desired user list from the VmUsers vault.
-    Joins the two by vmName, then for each reachable VM reconciles OS users
-    and sudoers rules via SSH.
+    Joins the two by vmName, then for each reachable VM removes sudoers
+    files, user accounts, and declared groups via SSH.
+
+    The same VmUsersConfig that drives create-users.ps1 drives this script -
+    every user and declared group in the config is removed.
 
     Prerequisites:
     - setup-secrets.ps1 has been run at least once on this machine.
@@ -15,18 +17,16 @@
     - Posh-SSH is installed, or an internet connection is available so this
       script can install it from PSGallery automatically.
 
+    Unreachable VMs are warned and skipped. Re-run once the VM is reachable,
+    or remove the users manually.
+
 .EXAMPLE
-    .\create-users.ps1
+    .\remove-users.ps1
 #>
 
 [CmdletBinding()]
 param(
-    # Required. The secret reads target `VmProvisionerConfig-<Suffix>`
-    # and `VmUsersConfig-<Suffix>`. Operator invocations pass
-    # `Production`; ephemeral fixtures (test harnesses, parallel
-    # workflows, multi-tenant deployments) pass their own label.
-    # Mandatory so a caller cannot silently fall through to a default
-    # name and collide with another lifecycle's data.
+    # Required. See create-users.ps1 for the suffix contract.
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
     [string] $SecretSuffix
@@ -38,16 +38,16 @@ $ErrorActionPreference = 'Stop'
 # Install / import every required PowerShell module. The helper owns the
 # dependency list for this repo so each entry-point script does not repeat
 # the bootstrap block.
-. "$PSScriptRoot\Install-ModuleDependencies.ps1"
+. "$PSScriptRoot\..\shared\Install-ModuleDependencies.ps1"
 
 # Dot-source helpers after the modules are loaded so Assert-RequiredProperties
 # (Common.PowerShell) and the SSH helpers (Infrastructure.HyperV) are
 # available inside their function bodies.
 . "$PSScriptRoot\reconcile\common\ConvertFrom-VmUsersConfigJson.ps1"
-. "$PSScriptRoot\reconcile\up\Invoke-GroupReconciliation.ps1"
-. "$PSScriptRoot\reconcile\up\Invoke-SudoersReconciliation.ps1"
-. "$PSScriptRoot\reconcile\up\Invoke-UserReconciliation.ps1"
-. "$PSScriptRoot\reconcile\up\Invoke-VmUserCreate.ps1"
+. "$PSScriptRoot\reconcile\down\Invoke-VmUserRemove.ps1"
+. "$PSScriptRoot\reconcile\down\Remove-VmGroups.ps1"
+. "$PSScriptRoot\reconcile\down\Remove-VmSudoers.ps1"
+. "$PSScriptRoot\reconcile\down\Remove-VmUsers.ps1"
 
 # ---------------------------------------------------------------------------
 # 1. Read VmProvisionerConfig from the VmProvisioner vault
@@ -80,16 +80,11 @@ Write-Host "OK - $($provisionerVms.Count) VM(s) in $provisionerSecretName." `
 #    _RouterVm on each workload so New-VmSshClientWithJump picks the
 #    jump-through-router path for that workload's session.
 #
-#    When no router row is present the batch predates feature 53 (or the
-#    operator deliberately runs a single-switch topology); every workload
-#    keeps the legacy direct-connect path and the join below proceeds as
-#    before.
+#    Symmetric with create-users.ps1's resolution block; both scripts
+#    own the same lookup so neither becomes the implicit pre-condition
+#    for the other.
 # ---------------------------------------------------------------------------
 
-# Import Hyper-V here (not in Install-ModuleDependencies) because Get-VM /
-# Get-VMNetworkAdapter are needed only when a router row is present, and
-# Install-ModuleDependencies runs unconditionally - importing it there
-# would fail on Hyper-V-absent hosts that the no-router path supports.
 $routerVm = $provisionerVms | Where-Object {
     $_.PSObject.Properties['kind'] -and $_.kind -eq 'router'
 } | Select-Object -First 1
@@ -97,10 +92,6 @@ $routerVm = $provisionerVms | Where-Object {
 if ($null -ne $routerVm) {
     Import-Module Hyper-V -ErrorAction Stop
 
-    # Static-mode routers (externalDhcp = false) keep their ipAddress in
-    # the vault; DHCP-mode routers (the schema default) carry it only in
-    # Hyper-V KVP. Discover on demand so both modes work without forking
-    # the call site.
     if (-not ($routerVm.PSObject.Properties['ipAddress'] -and $routerVm.ipAddress)) {
         Write-Host "Resolving router '$($routerVm.vmName)' upstream IP via KVP ..." `
             -NoNewline -ForegroundColor Cyan
@@ -113,10 +104,6 @@ if ($null -ne $routerVm) {
         Write-Host " $routerIp" -ForegroundColor Green
     }
 
-    # Stamp _RouterVm onto every workload (kind != 'router') sharing the
-    # router's privateSwitchName. New-VmSshClientWithJump reads this
-    # property to decide direct-vs-jumped connection without callers
-    # having to thread the router VM explicitly.
     foreach ($vm in $provisionerVms) {
         $isRouter = $vm.PSObject.Properties['kind'] -and $vm.kind -eq 'router'
         if ($isRouter) { continue }
@@ -191,11 +178,8 @@ Write-Host "Matched $($targets.Count) of $($userEntries.Count) VM entry/entries.
 #    where ICMP succeeds before sshd binds.
 #
 #    Workloads carrying _RouterVm (feature-53 NAT topology) sit on a
-#    private switch the host has no route to - a direct Test-VmSshPort
-#    would always return $false. Skip the probe for those: the connect
-#    attempt below opens a tunnel + session in one step and surfaces its
-#    own "unreachable" diagnostic when either leg fails, which is the
-#    same information the probe was trying to extract.
+#    private switch the host has no route to - skip the direct probe
+#    and rely on the connect attempt's own diagnostics.
 # ---------------------------------------------------------------------------
 
 $reachable = [System.Collections.Generic.List[hashtable]]::new()
@@ -228,20 +212,15 @@ Write-Host "$($reachable.Count) of $($targets.Count) matched VM(s) reachable." `
     -ForegroundColor Cyan
 
 # ---------------------------------------------------------------------------
-# 5. Reconciliation via SSH
-#    For each reachable VM, open one SSH session and reconcile groups, users,
-#    and sudoers rules within it. The session is always closed in the finally
-#    block, even if an operation throws.
+# 5. Removal via SSH
+#    For each reachable VM, open one SSH session and remove sudoers files,
+#    users, and declared groups within it. The session is always closed in
+#    the finally block, even if an operation throws.
 #
-#    Security note: -AcceptKey auto-trusts the host key on first connection
-#    without verifying a fingerprint. This is acceptable on an internal
-#    Hyper-V network with statically provisioned IPs. Do NOT use -AcceptKey
-#    against untrusted or shared networks.
-#
-#    Sudo assumption: cloud-init adds the provisioned admin user to the
-#    sudo group with NOPASSWD via /etc/sudoers.d/90-cloud-init-users (Ubuntu
-#    default). If your image disables passwordless sudo, add -sudo-password
-#    handling before the useradd/usermod calls.
+#    Security note: SSH.NET accepts any host key by default (no
+#    HostKeyReceived handler). This is equivalent to Posh-SSH's -AcceptKey
+#    and is acceptable on a private Hyper-V network with statically
+#    provisioned IPs. Do NOT use on untrusted networks.
 # ---------------------------------------------------------------------------
 
 foreach ($t in $reachable) {
@@ -252,27 +231,16 @@ foreach ($t in $reachable) {
     Write-Host "[$name] Connecting as '$($prov.username)' ..." `
         -ForegroundColor Cyan
 
-    # New-VmSshClientWithJump owns the direct-vs-jump decision:
-    #   - Workload with _RouterVm stamped (feature-53 NAT topology):
-    #     opens SSH to the router, sets up a Renci.SshNet.ForwardedPortLocal
-    #     to the workload's :22, then connects through the loopback
-    #     endpoint. The returned session's Dispose tears the tunnel
-    #     down in the right order.
-    #   - Static / pre-feature-53 caller: direct New-VmSshClient.
-    # Either way callers see a uniform { Client, Tunnel, Dispose() }
-    # shape, so the surrounding flow does not branch on topology.
-    #
-    # Security note: New-VmSshClient (and the jump leg inside the
-    # helper) accepts any host key - same posture as the legacy
-    # direct-SshClient code path this replaced. Acceptable on a
-    # private Hyper-V network with statically provisioned IPs; do NOT
-    # use on untrusted networks.
+    # New-VmSshClientWithJump branches on _RouterVm: jumped through
+    # router when stamped (feature-53 NAT), direct otherwise. The
+    # returned session exposes Client + Tunnel + Dispose() so the
+    # surrounding flow does not have to branch.
     $sshSession = $null
 
     try {
         $sshSession = New-VmSshClientWithJump -Vm $prov
 
-        Invoke-VmUserCreate `
+        Invoke-VmUserRemove `
             -SshClient $sshSession.Client `
             -VmName    $name `
             -Entry     $t.Entry
@@ -287,11 +255,6 @@ foreach ($t in $reachable) {
         Write-Error "[$name] SSH port refused: $($_.Exception.Message)"
     }
     finally {
-        # Session owns both the workload client AND (when jumped) the
-        # underlying tunnel; Dispose() tears them down in the right
-        # order so the workload session closes before the forwarded
-        # port goes away. Safe to call when $sshSession is $null
-        # (Connect threw before assignment).
         if ($null -ne $sshSession) {
             # Swallow teardown failures at verbose level so a Dispose()
             # error cannot mask the per-VM outcome reported above.

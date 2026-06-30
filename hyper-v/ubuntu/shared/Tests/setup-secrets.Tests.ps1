@@ -27,7 +27,7 @@
 #>
 
 BeforeAll {
-    $script:realPath = Join-Path $PSScriptRoot '..\..\hyper-v\ubuntu\setup-secrets.ps1'
+    $script:realPath = Join-Path $PSScriptRoot '..\setup-secrets.ps1'
 
     $script:shimDir = Join-Path ([IO.Path]::GetTempPath()) `
         ("setup-secrets-test-" + [Guid]::NewGuid().ToString('N'))

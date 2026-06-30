@@ -86,7 +86,7 @@ PowerShell 7+ (`pwsh`).
 ### 1. Store the config (once per machine)
 
 ```powershell
-.\hyper-v\ubuntu\setup-secrets.ps1 -ConfigFile C:\private\vm-users-config.json
+.\hyper-v\ubuntu\shared\setup-secrets.ps1 -ConfigFile C:\private\vm-users-config.json
 ```
 
 Re-running safely updates the stored config.
@@ -94,7 +94,7 @@ Re-running safely updates the stored config.
 ### 2. Reconcile users
 
 ```powershell
-.\hyper-v\ubuntu\create-users.ps1
+.\hyper-v\ubuntu\PowerShell\create-users.ps1
 ```
 
 The script is idempotent - re-running it produces the same result and emits
@@ -103,7 +103,7 @@ The script is idempotent - re-running it produces the same result and emits
 ### 3. Remove users
 
 ```powershell
-.\hyper-v\ubuntu\remove-users.ps1
+.\hyper-v\ubuntu\PowerShell\remove-users.ps1
 ```
 
 Reads the same `VmUsersConfig` used by `create-users.ps1` and removes every
@@ -291,13 +291,14 @@ group from each reachable VM. On each run:
 ## Consuming Common-Ansible
 
 The Ansible migration of the user domain (feature 19) places the user
-roles, playbooks, and operator wrappers in this repo, where they consume
-[Common-Ansible] as shared substrate rather than re-implementing the
+roles, playbooks, and operator wrappers in this repo - under the
+`hyper-v/ubuntu/Ansible/` slice (the by-impl repo layout) - where they
+consume [Common-Ansible] as shared substrate rather than re-implementing the
 controller. The reusable roles (`groups`, `users`, `sudoers`, and the
-`vm_users_entry` fact helper) live under [`roles/`](roles/), the
-operator playbooks under [`playbooks/`](playbooks/) (shared posture in
+`vm_users_entry` fact helper) live under [`roles/`](hyper-v/ubuntu/Ansible/roles/), the
+operator playbooks under [`playbooks/`](hyper-v/ubuntu/Ansible/playbooks/) (shared posture in
 [`docs/dev/playbook-conventions.md`](docs/dev/playbook-conventions.md)),
-and the Ansible operator wrappers under [`ops/`](ops/). This section
+and the Ansible operator wrappers under [`ops/`](hyper-v/ubuntu/Ansible/ops/). This section
 documents the reuse path that makes them work.
 
 Common-Ansible is consumed as a **single sibling checkout**. Its roles
@@ -306,7 +307,7 @@ inventory contract - so the roles and the bridge are one substrate and
 are taken together from one checked-out root, not split across
 transports (a Galaxy collection was rejected for that reason; see
 [Common-Ansible]'s README). The substrate root is resolved once by
-[`ops/imports/_common-ansible-root.sh`](ops/imports/_common-ansible-root.sh)
+[`ops/imports/_common-ansible-root.sh`](hyper-v/ubuntu/Ansible/ops/imports/_common-ansible-root.sh)
 (the same adapter pattern the lint shims use for Common-Automation),
 overridable with `COMMON_ANSIBLE_ROOT`:
 
@@ -317,8 +318,9 @@ overridable with `COMMON_ANSIBLE_ROOT`:
 
 This repo's **own** user roles, playbook, and extra-vars fragment are
 not reused from the substrate - they live here. The wrappers surface
-them to the bridge by declaring `CA_CONSUMER_ROOT` (this repo's root):
-the bridge then resolves the playbook from here, puts this repo's
+them to the bridge by declaring `CA_CONSUMER_ROOT` (this repo's
+`hyper-v/ubuntu/Ansible/` slice): the bridge then resolves the playbook from
+here, puts this repo's
 `roles/` **ahead of** the substrate `roles/` on `ANSIBLE_ROLES_PATH`
 (so `groups` / `users` / `sudoers` resolve to this repo by short name),
 and resolves the user extra-vars fragment from this repo's `ops/`. The
@@ -327,11 +329,13 @@ substrate carries no user domain; this repo owns it whole.
 ### Bootstrap
 
 ```bash
-# From WSL (or double-click ops\bootstrap-controller.bat on Windows):
+# From WSL, in the Ansible slice (or double-click
+# hyper-v\ubuntu\Ansible\ops\bootstrap-controller.bat on Windows):
+cd hyper-v/ubuntu/Ansible
 ops/bootstrap-controller.sh
 ```
 
-[`ops/bootstrap-controller.sh`](ops/bootstrap-controller.sh) is thin: it
+[`ops/bootstrap-controller.sh`](hyper-v/ubuntu/Ansible/ops/bootstrap-controller.sh) is thin: it
 locates the Common-Ansible sibling (override with `COMMON_ANSIBLE_ROOT`)
 and makes sure the shared controller is built, delegating to
 Common-Ansible's own bootstrap when its venv is absent. There is nothing
@@ -344,6 +348,8 @@ The Ansible flows are operator wrappers that declare what they need to
 the substrate bridge and dispatch a repo-local playbook through it:
 
 ```bash
+cd hyper-v/ubuntu/Ansible
+
 # Reconcile groups, users, and sudoers on every provisioned VM:
 SECRET_SUFFIX=Production ops/create-users.sh        # or ops\create-users.bat
 
@@ -355,24 +361,26 @@ SECRET_SUFFIX=Production ops/remove-users.sh        # or ops\remove-users.bat
 |---|---|
 | Vault / inventory / dispatch | The substrate bridge (`ops/_run-playbook.sh` in [Common-Ansible]), located via the root resolver |
 | Which vaults to read | Declared by the wrapper via the `CA_*` contract (`CA_INVENTORY_VAULT=VmProvisioner`, `CA_EXTRA_VAULTS=VmUsers`) |
-| Where the playbook / roles / fragment live | Declared by the wrapper as `CA_CONSUMER_ROOT` (this repo's root); the bridge resolves all three from here |
+| Where the playbook / roles / fragment live | Declared by the wrapper as `CA_CONSUMER_ROOT` (this repo's `hyper-v/ubuntu/Ansible/` slice); the bridge resolves all three from here |
 | Which lifecycle's secrets | `SECRET_SUFFIX` (e.g. `Production`) - required by the bridge; the wrapper does not default it |
-| The user roles | `groups`, `users`, `sudoers` (and the `vm_users_entry` fact helper) under [`roles/`](roles/), put ahead of the substrate `roles/` on the path |
-| User extra-vars fragment | [`ops/_build-extra-vars-users.sh`](ops/_build-extra-vars-users.sh) emits `vm_users_config`; the substrate composer dispatches to it from `CA_CONSUMER_ROOT/ops` |
+| The user roles | `groups`, `users`, `sudoers` (and the `vm_users_entry` fact helper) under [`roles/`](hyper-v/ubuntu/Ansible/roles/), put ahead of the substrate `roles/` on the path |
+| User extra-vars fragment | [`ops/_build-extra-vars-users.sh`](hyper-v/ubuntu/Ansible/ops/_build-extra-vars-users.sh) emits `vm_users_config`; the substrate composer dispatches to it from `CA_CONSUMER_ROOT/ops` |
 
 Forwarded arguments follow the bridge's playbook path, so `--tags`,
 `--limit <vm>`, `--check`, and `-v` pass straight through to
 `ansible-playbook`. The roles are covered by the molecule scenarios
-under [`Tests/molecule/`](Tests/molecule/) (Docker driver, one
+under [`Tests/molecule/`](hyper-v/ubuntu/Ansible/Tests/molecule/) (Docker driver, one
 `default` and one `remove` scenario per role).
 
 ### Smoke check
 
-[`playbooks/smoke.yml`](playbooks/smoke.yml) references a substrate role
+[`playbooks/smoke.yml`](hyper-v/ubuntu/Ansible/playbooks/smoke.yml) references a substrate role
 by its short name (`groups`). With the sibling's roles on the path:
 
 ```bash
-ANSIBLE_ROLES_PATH="../Common-Ansible/roles" \
+cd hyper-v/ubuntu/Ansible
+# the Common-Ansible sibling is four levels above this slice:
+ANSIBLE_ROLES_PATH="../../../../Common-Ansible/roles" \
   ansible-playbook --syntax-check playbooks/smoke.yml -i localhost,
 ```
 
@@ -443,77 +451,55 @@ via `COMMON_AUTOMATION_TARGET_REPO`, so a sibling checkout at
 ## Repo structure
 
 This repo carries **two user-provisioning implementations** plus the secret
-store they share. The top-level directories group by that split:
+store they share, organised as self-contained slices under `hyper-v/ubuntu/`.
+Each slice holds its own code **and** tests:
 
-| Bucket | Directories |
+| Bucket | Slice |
 |---|---|
-| **PowerShell impl** | `hyper-v/` (entry points + `reconcile/` logic), `Tests/hyper-v/` |
-| **Ansible impl** (Common-Ansible consumer) | `roles/`, `playbooks/`, `ops/`, `requirements.yml`, `Tests/molecule` |
-| **Shared** | the local SecretStore vault, set up by `hyper-v/ubuntu/setup-secrets.ps1` and read by both impls |
-| **Tooling** | `.github/`, `scripts/`, `.gitattributes`, `docs/` |
+| **Shared** | `hyper-v/ubuntu/shared/` — `setup-secrets.ps1` (writes the vault both impls read) + module deps |
+| **PowerShell impl** | `hyper-v/ubuntu/PowerShell/` — entry points + `reconcile/` logic |
+| **Ansible impl** (Common-Ansible consumer) | `hyper-v/ubuntu/Ansible/` — roles, playbooks, ops wrappers, requirements |
+| **Tooling** | `.github/`, `scripts/`, `ansible.cfg` (lint shim, see below), `.gitattributes`, `docs/` |
 
 ```
-Infrastructure-Vm-Users/
-|- .gitattributes           # Pins *.sh to LF and *.bat to CRLF
-|- .github/
-|  `- workflows/
-|     |- ci.yml             # Delegates to shared ci-powershell.yml in Common-PowerShell
-|     |- ci-yaml.yml        # Delegates to Common-Automation reusable ci-yaml.yml
-|     `- ci-bash.yml        # Delegates to Common-Automation reusable ci-bash.yml
-|- requirements.yml         # Galaxy collections for the roles (used by molecule + bootstrap)
-|- ops/
-|  |- imports/
-|  |  `- _common-ansible-root.sh # Resolves the Common-Ansible sibling root (roles + bridge)
-|  |- bootstrap-controller.sh   # Consumer controller bootstrap: reuse the substrate controller
-|  |- bootstrap-controller.bat  # Explorer launcher (runs the .sh via WSL)
-|  |- create-users.sh / create-users.bat # Ansible create-users wrapper (dispatches the substrate bridge)
-|  |- remove-users.sh / remove-users.bat # Ansible remove-users wrapper (dispatches the substrate bridge)
-|  `- _build-extra-vars-users.sh # User-domain extra-vars fragment (emits vm_users_config)
-|- roles/                   # Reusable user roles, consumed by short name via the substrate
-|  |- vm_users_entry/        # Sets the per-host vm_users_entry fact (meta-dep of the others)
-|  |- groups/               # Reconcile / remove declared OS groups
-|  |- users/                # Reconcile / remove declared OS users
-|  `- sudoers/              # Reconcile / remove /etc/sudoers.d drop-ins
-|- playbooks/
-|  |- smoke.yml             # Resolves a substrate role by short name (consumption smoke check)
-|  |- create-users.yml      # groups -> users -> sudoers against provisioned VMs
-|  |- remove-users.yml      # sudoers -> users -> groups (reverse)
-|  `- tasks/
-|     `- _ensure-acl-present.yml # Installs acl for unprivileged become (shared host prereq)
-|- hyper-v/
-|  `- ubuntu/
-|     |- create-users.ps1    # Entry point - reconciles groups, users, and sudoers
-|     |- remove-users.ps1    # Entry point - removes users, sudoers, and groups
-|     |- setup-secrets.ps1   # One-time vault setup
-|     `- reconcile/
-|        |- common/          # Shared between create and remove
-|        |- up/              # User creation and reconciliation
-|        `- down/            # User removal
-|- Tests/                    # Split by impl, mirroring the production layout
-|  |- hyper-v/               # PowerShell-impl tests (mirror hyper-v/)
-|  |  |- reconcile/          # Unit tests for reconcile/{common,up,down}
-|  |  |  |- common/  |- up/  `- down/
-|  |  |- Integration.DockerHost/ # Integration tests - one shared SSH session (Docker)
-|  |  |  `- Reconcile.Tests.ps1  # All integration tests (groups, users, sudoers, removal)
-|  |  `- create-users.Tests.ps1 / remove-users.Tests.ps1 / setup-secrets.Tests.ps1
-|  `- molecule/              # Ansible-impl: molecule scenarios for the roles (Docker driver)
-|     |- groups/             # default + remove scenarios
-|     |- users/              # default + remove scenarios
-|     `- sudoers/            # default + remove scenarios
-|- docs/
-|  `- dev/
-|     |- playbook-conventions.md # Shared posture for the user playbooks
-|     `- implementation/
-|        |- 01 - initial implementation/
-|        `- 02 - user removal/
-|- scripts/
-|  |- Run-Tests.ps1          # Runs Pester unit tests (called by ci-powershell.yml)
-|  |- Run-IntegrationTests.ps1            # Integration-test runner
-|  |- run-ci-yaml-and-bash.sh / run-ci-yaml-and-bash.bat              # MAIN: full local lint + bats (Common-Automation engine)
-|  |- run-lint-yaml-and-bash.sh / run-lint-yaml-and-bash.bat          # Lint half only (shellcheck, actionlint, yamllint, ...)
-|  |- run-tests-bash.sh / run-tests-bash.bat                          # Bats test half only
-|  `- fix-permissions.sh / fix-permissions.bat  # Re-stage +x on tracked *.sh via the shared engine
-`- README.md
+hyper-v/ubuntu/
+  shared/                       Used by both impls
+    setup-secrets.ps1             One-time vault setup
+    Install-ModuleDependencies.ps1
+    Tests/                        setup-secrets.Tests.ps1
+  PowerShell/                   PowerShell user implementation
+    create-users.ps1              Entry point - reconciles groups, users, sudoers
+    remove-users.ps1              Entry point - removes users, sudoers, groups
+    reconcile/ {common,up,down}   Shared / create / remove reconciliation logic
+    Tests/
+      reconcile/ {common,up,down}     Unit tests mirroring the impl
+      Integration.DockerHost/         One shared SSH session (Docker)
+      create-users.Tests.ps1  remove-users.Tests.ps1
+  Ansible/                      Ansible user implementation (Common-Ansible consumer)
+    ops/                          Operator wrappers + domain helpers
+      create-users.sh / .bat  remove-users.sh / .bat   Flow entries (dispatch the substrate bridge)
+      bootstrap-controller.sh / .bat   Reuse the Common-Ansible controller venv
+      _build-extra-vars-users.sh       User-domain extra-vars fragment (emits vm_users_config)
+      imports/_common-ansible-root.sh  Resolves the Common-Ansible sibling root
+    playbooks/                    create-users.yml, remove-users.yml, smoke.yml + tasks/
+    roles/                        vm_users_entry, groups, users, sudoers
+    requirements.yml              Galaxy collections (molecule + bootstrap)
+    Tests/
+      molecule/ {groups,users,sudoers}   default + remove scenarios per role
+ansible.cfg                     Lint shim: keeps the fleet ansible-lint gate active for the
+                                nested Ansible slice (roles_path -> hyper-v/ubuntu/Ansible/roles).
+                                NOT used at runtime - the bridge uses the substrate's ansible.cfg.
+.github/workflows/
+  ci.yml                        Delegates to shared ci-powershell.yml in Common-PowerShell
+  ci-yaml.yml  ci-bash.yml      Delegate to Common-Automation reusable workflows
+scripts/
+  Run-Tests.ps1  Run-IntegrationTests.ps1   Pester unit / integration runners
+  run-ci-yaml-and-bash.sh / .bat            MAIN: full local lint + bats
+  run-lint-yaml-and-bash.sh / .bat          Lint half only
+  run-tests-bash.sh / .bat                  Bats test half only
+  fix-permissions.sh / .bat                 Re-stage +x on tracked *.sh
+docs/dev/                       playbook-conventions.md + implementation/
+.gitattributes                  Pins *.sh to LF and *.bat to CRLF
 ```
 
 [Common-Ansible]: ../Common-Ansible

@@ -11,11 +11,12 @@
 #
 # Guarded so sourcing it from several scripts in one run resolves the root
 # only once. COMMON_ANSIBLE_ROOT overrides the sibling-checkout default (for
-# tests / non-standard layouts). The relative fallback walks three levels up:
-# ops/imports -> ops -> repo root -> c:\a_Code, then into the Common-Ansible
+# tests / non-standard layouts). The relative fallback walks six levels up
+# from this repo's nested Ansible slice: ops/imports -> ops -> Ansible ->
+# ubuntu -> hyper-v -> repo root -> c:\a_Code, then into the Common-Ansible
 # sibling. The plain assignment (not `: "${x:=...}"`) observes the cd's exit
 # status rather than masking it (shellcheck SC2312).
 if [[ -z "${common_ansible_root:-}" ]]; then
     # shellcheck disable=SC2034  # consumed by the scripts that source this
-    common_ansible_root="${COMMON_ANSIBLE_ROOT:-$(cd "${BASH_SOURCE[0]%/*}/../../../Common-Ansible" && pwd)}"
+    common_ansible_root="${COMMON_ANSIBLE_ROOT:-$(cd "${BASH_SOURCE[0]%/*}/../../../../../../Common-Ansible" && pwd)}"
 fi
