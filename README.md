@@ -364,7 +364,7 @@ SECRET_SUFFIX=Production ops/remove-users.sh        # or ops\remove-users.bat
 | Where the playbook / roles / fragment live | Declared by the wrapper as `CA_CONSUMER_ROOT` (this repo's `hyper-v/ubuntu/Ansible/` slice); the bridge resolves all three from here |
 | Which lifecycle's secrets | `SECRET_SUFFIX` (e.g. `Production`) - required by the bridge; the wrapper does not default it |
 | The user roles | `groups`, `users`, `sudoers` (and the `vm_users_entry` fact helper) under [`roles/`](hyper-v/ubuntu/Ansible/roles/), put ahead of the substrate `roles/` on the path |
-| User extra-vars fragment | [`ops/_build-extra-vars-users.sh`](hyper-v/ubuntu/Ansible/ops/_build-extra-vars-users.sh) emits `vm_users_config`; the substrate composer dispatches to it from `CA_CONSUMER_ROOT/ops` |
+| User extra-vars fragment | [`ops/_build-extra-vars-VmUsers.sh`](hyper-v/ubuntu/Ansible/ops/_build-extra-vars-VmUsers.sh) emits `vm_users_config`; the substrate composer derives it by the `_build-extra-vars-<Name>.sh` convention from the `VmUsers` vault and dispatches to it from `CA_CONSUMER_ROOT/ops` |
 
 Forwarded arguments follow the bridge's playbook path, so `--tags`,
 `--limit <vm>`, `--check`, and `-v` pass straight through to
@@ -479,7 +479,7 @@ hyper-v/ubuntu/
     ops/                          Operator wrappers + domain helpers
       create-users.sh / .bat  remove-users.sh / .bat   Flow entries (dispatch the substrate bridge)
       bootstrap-controller.sh / .bat   Reuse the Common-Ansible controller venv
-      _build-extra-vars-users.sh       User-domain extra-vars fragment (emits vm_users_config)
+      _build-extra-vars-VmUsers.sh     User-domain extra-vars fragment (emits vm_users_config)
       imports/_common-ansible-root.sh  Resolves the Common-Ansible sibling root
     playbooks/                    create-users.yml, remove-users.yml, smoke.yml + tasks/
     roles/                        vm_users_entry, groups, users, sudoers

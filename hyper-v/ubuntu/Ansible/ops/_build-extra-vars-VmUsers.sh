@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Per-domain extra-vars helper: users. Owned by Infrastructure-Vm-Users
 # (the user domain's home) and consumed by the Common-Ansible substrate
-# composer (ops/_build-extra-vars.sh), which dispatches the VmUsers vault
-# to this fragment.
+# composer (ops/_build-extra-vars.sh). The composer derives this helper by the
+# generic _build-extra-vars-<Name>.sh convention from the declared VmUsers vault
+# and hands it the vault's config path on the generic --config flag.
 #
 # Emits the single top-level key `vm_users_config` consumed by the
 # groups / users / sudoers roles.
@@ -26,12 +27,12 @@ source "${common_ansible_root}/ops/_die-on-unknown-flag.sh"
 users_path=""
 
 usage() {
-    echo "usage: _build-extra-vars-users.sh --users-config <path>" >&2
+    echo "usage: _build-extra-vars-VmUsers.sh --config <path>" >&2
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --users-config)
+        --config)
             users_path="${2:-}"
             shift 2 || true
             ;;
@@ -46,6 +47,6 @@ if [[ -z "${users_path}" ]]; then
     exit 2
 fi
 
-_validate_extra_vars_input --users-config "${users_path}"
+_validate_extra_vars_input --config "${users_path}"
 
 jq -n --slurpfile u "${users_path}" '{vm_users_config: $u[0]}'
