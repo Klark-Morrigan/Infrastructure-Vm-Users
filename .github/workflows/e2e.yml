@@ -4,13 +4,12 @@ name: Infrastructure-E2E
 # Always runs the full lifecycle layer - a users change can cascade to break
 # runner registration, so the full stack must be verified.
 #
-# Pins usersFlow=ansible so this repo's PR exercises its Ansible users flow
-# (create-users.sh / remove-users.sh on the Common-Ansible substrate); that flow
-# needs WslDistro in the E2EConfig vault. runnersFlow is custom-powershell: a
-# users PR verifies the full stack, but exercising the runner Ansible flow is the
-# runner owner's check, not this one. This pin does not cover the PowerShell
-# create-users.ps1 / remove-users.ps1 path - use an explicit override or a matrix
-# for that.
+# Pins both layers to ansible so this repo's PR exercises the full Ansible stack -
+# its own users flow (create-users.sh / remove-users.sh on the Common-Ansible
+# substrate) and the runner flow the full lifecycle cascades into. The ansible
+# flows need WslDistro in the E2EConfig vault. This pin does not cover the
+# PowerShell create-users.ps1 / remove-users.ps1 path - use an explicit override
+# or a matrix for that.
 on:
   pull_request:
 
@@ -19,4 +18,4 @@ jobs:
     uses: Klark-Morrigan/Infrastructure-E2E/.github/workflows/e2e.yml@master
     secrets: inherit
     with:
-      flow-spec: '{"usersFlow":"ansible","runnersFlow":"custom-powershell"}'
+      flow-spec: '{"usersFlow":"ansible","runnersFlow":"ansible"}'
