@@ -335,12 +335,15 @@ cd hyper-v/ubuntu/Ansible
 ops/bootstrap-controller.sh
 ```
 
-[`ops/bootstrap-controller.sh`](hyper-v/ubuntu/Ansible/ops/bootstrap-controller.sh) is thin: it
-locates the Common-Ansible sibling (override with `COMMON_ANSIBLE_ROOT`)
-and makes sure the shared controller is built, delegating to
-Common-Ansible's own bootstrap when its venv is absent. There is nothing
-to install for this repo - reusing the substrate controller instead of
-forking it is the whole point of the Common- split.
+[`ops/bootstrap-controller.sh`](hyper-v/ubuntu/Ansible/ops/bootstrap-controller.sh) is a thin
+shim: it resolves the Common-Ansible sibling (override with
+`COMMON_ANSIBLE_ROOT`) and execs the substrate's shared consumer bootstrap
+(`ops/bootstrap-controller-consumer.sh`), which makes sure the controller is
+built - delegating to Common-Ansible's own bootstrap when its venv is absent.
+That locate/build logic is a single source of truth in the substrate, shared
+by every consumer. There is nothing to install for this repo - reusing the
+substrate controller instead of forking it is the whole point of the Common-
+split.
 
 ### Running the create / remove user flows
 
