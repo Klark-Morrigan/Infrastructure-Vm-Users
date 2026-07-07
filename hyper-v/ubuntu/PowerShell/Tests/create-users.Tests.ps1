@@ -229,3 +229,112 @@ Describe 'create-users.ps1 - no stale unsuffixed literals' {
         @($offenders).Count | Should -Be 0
     }
 }
+
+Describe 'create-users.ps1 - cross-process timing export (feature 88 D2)' {
+
+    # create-users.ps1 is the CHILD half of the process-boundary timing bridge:
+    # a parent orchestrator (the E2E runner) sets $env:TIMING_TREE_OUTPUT_PATH
+    # and the script serialises its phase tree there via the
+    # Export-PhaseTimingTree shim so the parent can graft this run's timings
+    # under the "reconcile users" part that shelled out to it. The behavioural
+    # guarantee that the shim writes schema-valid JSON when a path is given and
+    # no-ops when the context was never initialised is owned by
+    # Common.PowerShell's Export-PhaseTimingTree.Tests.ps1. create-users.ps1 has
+    # top-level side effects (vault reads, module imports, SSH loop) so it
+    # cannot be dot-sourced to exercise it end-to-end; these AST checks pin what
+    # the script adds - the stage declarations, the per-stage wrappers, and the
+    # single env-guarded export - the same structural way the rest of this suite
+    # pins wiring.
+
+    BeforeAll {
+        $script:initCalls = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Initialize-PhaseTimings' })
+        $script:phaseTimerCalls = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Invoke-WithPhaseTimer' })
+        $script:exportCalls = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Export-PhaseTimingTree' })
+
+        # The outer try/finally (the only one with a Finally block); its extent
+        # bounds the finally-path export.
+        $script:outerTry = $script:ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.TryStatementAst] -and
+            $null -ne $node.Finally
+        }, $true) | Select-Object -First 1
+
+        # The three stages create-users.ps1 times, in run order. Each is
+        # pre-declared (so a never-run stage still renders) and wrapped in its
+        # own Invoke-WithPhaseTimer.
+        $script:expectedPhases = @(
+            'Read configs + resolve router IP',
+            'Match + SSH-probe targets',
+            'Per-VM SSH reconcile'
+        )
+    }
+
+    It 'declares the timing context once via Initialize-PhaseTimings' {
+        $script:initCalls.Count | Should -Be 1
+    }
+
+    It 'records the three stages under the expected names' {
+        # Guards the stage names the E2E graft (C2) attaches under the
+        # "reconcile users" part; a rename here silently reshapes that report.
+        $wrapped = $script:phaseTimerCalls | ForEach-Object {
+            (Get-BoundArgFor -Call $_ -ParameterName 'Name').Value
+        }
+        foreach ($phase in $script:expectedPhases) {
+            $wrapped | Should -Contain $phase
+        }
+    }
+
+    It 'wraps each stage in its own Invoke-WithPhaseTimer' {
+        $script:phaseTimerCalls.Count | Should -Be $script:expectedPhases.Count
+    }
+
+    It 'invokes Export-PhaseTimingTree exactly once (finally)' {
+        # create-users.ps1 has no early-exit path (unlike provision.ps1's
+        # reboot exit), so a single finally-path export covers the success and
+        # failure paths both.
+        $script:exportCalls.Count | Should -Be 1
+    }
+
+    It 'guards the export behind an $env:TIMING_TREE_OUTPUT_PATH check' {
+        # Unset => the guard is false => no call => no file written, so the
+        # opt-out path leaves an operator run's behaviour unchanged.
+        $ifAst = $script:exportCalls[0].Parent
+        while ($null -ne $ifAst -and
+               -not ($ifAst -is [System.Management.Automation.Language.IfStatementAst])) {
+            $ifAst = $ifAst.Parent
+        }
+        $ifAst | Should -Not -BeNullOrEmpty `
+            -Because 'an unconditional export would drop a stray artifact on every operator run'
+        $ifAst.Clauses[0].Item1.Extent.Text |
+            Should -Match 'env:TIMING_TREE_OUTPUT_PATH'
+    }
+
+    It 'passes $env:TIMING_TREE_OUTPUT_PATH as the export -Path' {
+        $script:exportCalls[0].Extent.Text |
+            Should -Match '-Path\s+\$env:TIMING_TREE_OUTPUT_PATH'
+    }
+
+    It 'exports from the outer try/finally (fires on success and failure)' {
+        $script:outerTry | Should -Not -BeNullOrEmpty
+        $finallyExtent = $script:outerTry.Finally.Extent
+        $inFinally = @($script:exportCalls | Where-Object {
+            $_.Extent.StartOffset -ge $finallyExtent.StartOffset -and
+            $_.Extent.EndOffset   -le $finallyExtent.EndOffset
+        })
+        $inFinally.Count | Should -Be 1 `
+            -Because 'the finally export covers both normal-completion and thrown-failure paths'
+    }
+
+    It 'raises the Common.PowerShell floor to the Export-PhaseTimingTree release (>= 9.2.0)' {
+        # The shim ships in Common.PowerShell 9.2.0; the bootstrap floor must
+        # rise so the import resolves it. Pin the MinimumVersion so a downgrade
+        # cannot silently leave the script calling an unexported verb.
+        $depsPath = Join-Path (Split-Path $script:scriptPath -Parent) `
+            '..\shared\Install-ModuleDependencies.ps1'
+        $depsText = Get-Content -Path $depsPath -Raw
+        $depsText | Should -Match "MinimumVersion '(9\.(?:[2-9]|\d\d+)\.\d+|[1-9]\d+\.\d+\.\d+)'"
+    }
+}

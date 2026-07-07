@@ -21,6 +21,7 @@ state stored in a local encrypted vault.
 - [Config reference](#config-reference)
 - [Reconciliation behaviour](#reconciliation-behaviour)
 - [Removal](#removal)
+- [Cross-process timing (opt-in)](#cross-process-timing-opt-in)
 - [Consuming Common-Ansible](#consuming-common-ansible)
 - [CI](#ci)
 - [Repo structure](#repo-structure)
@@ -288,6 +289,24 @@ group from each reachable VM. On each run:
 
 ---
 
+## Cross-process timing (opt-in)
+
+Both `create-users.ps1` and `remove-users.ps1` time their three stages -
+`Read configs + resolve router IP`, `Match + SSH-probe targets`, and the
+per-VM SSH reconcile/removal - using the phase-timing shims from
+`Common.PowerShell`. The timing is invisible to a direct operator run.
+
+When the environment variable **`TIMING_TREE_OUTPUT_PATH`** is set, each
+script also serialises its phase tree to that path (as schema-versioned
+nested JSON) on both the success and failure paths. A parent orchestrator -
+[Infrastructure-E2E] - sets it before shelling out and grafts the imported
+tree under its "reconcile users" part, so an otherwise opaque shell-out span
+gains its internal breakdown. The variable name is neutral: these scripts do
+not know who consumes it. When it is unset, no file is written and behaviour
+is unchanged.
+
+---
+
 ## Consuming Common-Ansible
 
 The Ansible migration of the user domain (feature 19) places the user
@@ -506,4 +525,5 @@ docs/dev/                       playbook-conventions.md + implementation/
 ```
 
 [Common-Ansible]: ../Common-Ansible
+[Infrastructure-E2E]: ../Infrastructure-E2E
 [Infrastructure-Vm-Provisioner]: ../Infrastructure-Vm-Provisioner
