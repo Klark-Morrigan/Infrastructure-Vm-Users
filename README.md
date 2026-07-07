@@ -291,14 +291,20 @@ group from each reachable VM. On each run:
 
 ## Cross-process timing (opt-in)
 
-Both `create-users.ps1` and `remove-users.ps1` time their three stages -
-`Read configs + resolve router IP`, `Match + SSH-probe targets`, and the
-per-VM SSH reconcile/removal - using the phase-timing shims from
-`Common.PowerShell`. The timing is invisible to a direct operator run.
+Both `create-users.ps1` and `remove-users.ps1` run through one shared
+orchestrator (`reconcile/common/Invoke-VmUserReconcileRun.ps1`) that times its
+three stages - `Read configs + resolve router IP`, `Match + SSH-probe targets`,
+and the per-VM SSH reconcile/removal (the final stage's label differs per
+direction) - using the phase-timing shims from `Common.PowerShell`. The timing
+is invisible to a direct operator run.
 
-When the environment variable **`TIMING_TREE_OUTPUT_PATH`** is set, each
-script also serialises its phase tree to that path (as schema-versioned
-nested JSON) on both the success and failure paths. A parent orchestrator -
+When the environment variable **`TIMING_TREE_OUTPUT_PATH`** is set, the
+orchestrator also serialises the phase tree to that path (as schema-versioned
+nested JSON) on both the success and failure paths. It does this with a single
+`Export-PhaseTimingTreeIfRequested` call in its outer `finally`: that
+self-guarding `Common.PowerShell` shim reads the variable and exports only when
+it is set, so the guard and the contract name live once inside the shim rather
+than being hand-written at each site. A parent orchestrator -
 [Infrastructure-E2E] - sets it before shelling out and grafts the imported
 tree under its "reconcile users" part, so an otherwise opaque shell-out span
 gains its internal breakdown. The variable name is neutral: these scripts do
@@ -490,9 +496,12 @@ hyper-v/ubuntu/
     Install-ModuleDependencies.ps1
     Tests/                        setup-secrets.Tests.ps1
   PowerShell/                   PowerShell user implementation
-    create-users.ps1              Entry point - reconciles groups, users, sudoers
-    remove-users.ps1              Entry point - removes users, sudoers, groups
-    reconcile/ {common,up,down}   Shared / create / remove reconciliation logic
+    create-users.ps1              Thin entry - calls the orchestrator (create direction)
+    remove-users.ps1              Thin entry - calls the orchestrator (remove direction)
+    reconcile/
+      common/                       Shared orchestrator (Invoke-VmUserReconcileRun) + config parser
+      up/                           Create-direction reconcile helpers
+      down/                         Remove-direction reconcile helpers
     Tests/
       reconcile/ {common,up,down}     Unit tests mirroring the impl
       Integration.DockerHost/         One shared SSH session (Docker)
