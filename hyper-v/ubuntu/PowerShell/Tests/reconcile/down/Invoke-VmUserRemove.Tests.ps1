@@ -3,6 +3,10 @@ BeforeAll {
     function Remove-VmSudoers { param($SshClient, $VmName, $User) }
     function Remove-VmUsers   { param($SshClient, $VmName, $User) }
 
+    # The real declared-groups helper is a pure function (no boundary to mock),
+    # so dot-source it rather than stub it - the group assertions below then
+    # exercise the actual guard.
+    . "$PSScriptRoot\..\..\..\reconcile\common\Get-VmEntryDeclaredGroups.ps1"
     . "$PSScriptRoot\..\..\..\reconcile\down\Invoke-VmUserRemove.ps1"
 
     $Script:FakeSsh = [PSCustomObject] @{}

@@ -50,6 +50,7 @@ $ErrorActionPreference = 'Stop'
 # available inside their function bodies. The shared orchestrator drives the
 # whole run; the create-direction reconcile helpers back its per-VM action.
 . "$PSScriptRoot\reconcile\common\ConvertFrom-VmUsersConfigJson.ps1"
+. "$PSScriptRoot\reconcile\common\Get-VmEntryDeclaredGroups.ps1"
 . "$PSScriptRoot\reconcile\common\Invoke-VmUserReconcileRun.ps1"
 . "$PSScriptRoot\reconcile\up\Invoke-GroupReconciliation.ps1"
 . "$PSScriptRoot\reconcile\up\Invoke-SudoersReconciliation.ps1"

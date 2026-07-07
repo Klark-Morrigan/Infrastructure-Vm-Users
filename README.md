@@ -499,7 +499,7 @@ hyper-v/ubuntu/
     create-users.ps1              Thin entry - calls the orchestrator (create direction)
     remove-users.ps1              Thin entry - calls the orchestrator (remove direction)
     reconcile/
-      common/                       Shared orchestrator (Invoke-VmUserReconcileRun) + config parser
+      common/                       Shared orchestrator (Invoke-VmUserReconcileRun), config parser, declared-groups guard
       up/                           Create-direction reconcile helpers
       down/                         Remove-direction reconcile helpers
     Tests/

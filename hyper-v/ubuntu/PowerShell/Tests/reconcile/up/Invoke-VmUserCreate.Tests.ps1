@@ -3,6 +3,10 @@ BeforeAll {
     function Invoke-SudoersReconciliation { param($SshClient, $VmName, $User) }
     function Invoke-UserReconciliation    { param($SshClient, $VmName, $User) }
 
+    # The real declared-groups helper is a pure function (no boundary to mock),
+    # so dot-source it rather than stub it - the group assertions below then
+    # exercise the actual guard.
+    . "$PSScriptRoot\..\..\..\reconcile\common\Get-VmEntryDeclaredGroups.ps1"
     . "$PSScriptRoot\..\..\..\reconcile\up\Invoke-VmUserCreate.ps1"
 
     $Script:FakeSsh = [PSCustomObject] @{}
