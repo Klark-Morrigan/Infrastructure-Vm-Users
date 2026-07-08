@@ -33,5 +33,30 @@ export CA_CONSUMER_ROOT
 
 # shellcheck source=hyper-v/ubuntu/Ansible/ops/imports/_common-ansible-root.sh
 source "${script_dir}/imports/_common-ansible-root.sh"
+# shellcheck source=hyper-v/ubuntu/Ansible/ops/imports/_timing.sh
+source "${script_dir}/imports/_timing.sh"
 
-exec "${common_ansible_root}/ops/_run-playbook.sh" playbooks/create-users.yml "$@"
+# Arm the timing emitter (a no-op unless TIMING_TREE_OUTPUT_PATH is set) so the
+# E2E orchestrator can graft this flow's dispatch span under its reconcile-users
+# part. Neutral opt-in; the flow does not name its consumer.
+timing_init "create-users"
+
+# Dispatch is the flow's dominant span. When timing is requested, run the
+# playbook under a span so its duration lands in the tree and the EXIT-trap
+# flush emits the artifact afterward; otherwise exec exactly as before, so the
+# uninstrumented path stays byte-for-byte unchanged.
+playbook_cmd=("${common_ansible_root}/ops/_run-playbook.sh" \
+    playbooks/create-users.yml "$@")
+# shellcheck disable=SC2310  # predicate in `if`; set -e intentionally relaxed
+if timing_enabled; then
+    timing_span_begin "run playbook"
+    playbook_rc=0
+    "${playbook_cmd[@]}" || playbook_rc=$?
+    if [[ "${playbook_rc}" -eq 0 ]]; then
+        timing_span_end
+    else
+        timing_span_end --failed
+    fi
+    exit "${playbook_rc}"
+fi
+exec "${playbook_cmd[@]}"
