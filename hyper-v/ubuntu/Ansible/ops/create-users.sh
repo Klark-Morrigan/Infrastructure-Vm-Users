@@ -49,14 +49,27 @@ playbook_cmd=("${common_ansible_root}/ops/_run-playbook.sh" \
     playbooks/create-users.yml "$@")
 # shellcheck disable=SC2310  # predicate in `if`; set -e intentionally relaxed
 if timing_enabled; then
+    # Deepen the run-playbook span into per-role -> per-task children. Point the
+    # timing_tree callback (the bridge enables it when this var is set) at a temp
+    # rows file, run, then graft the rows in before the span closes, so the tree
+    # shows `run playbook -> Gathering Facts / role -> task / ...` instead of one
+    # flat bar. The file lives on the WSL fs (mktemp), shared directly between the
+    # callback (inside ansible-playbook) and this reader - no /mnt/c, no WSLENV.
+    tasks_rows="$(mktemp)"
+    export TIMING_TASKS_OUTPUT_PATH="${tasks_rows}"
     timing_span_begin "run playbook"
     playbook_rc=0
     "${playbook_cmd[@]}" || playbook_rc=$?
+    # Graft before closing the span (no-op if the callback wrote nothing, e.g. a
+    # hard abort before stats). Independent of rc so a failed run still shows how
+    # far its tasks got.
+    timing_graft_children_from "${tasks_rows}"
     if [[ "${playbook_rc}" -eq 0 ]]; then
         timing_span_end
     else
         timing_span_end --failed
     fi
+    rm -f "${tasks_rows}"
     exit "${playbook_rc}"
 fi
 exec "${playbook_cmd[@]}"
