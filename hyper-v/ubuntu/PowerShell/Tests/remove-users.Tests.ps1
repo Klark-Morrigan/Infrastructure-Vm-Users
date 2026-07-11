@@ -1,12 +1,16 @@
 <#
 .SYNOPSIS
-    Structural wiring checks for remove-users.ps1.
+    Structural wiring checks for the thin remove-users.ps1 entry script.
 
 .DESCRIPTION
-    See create-users.Tests.ps1 for the rationale - remove-users.ps1
-    has the same two-vault read shape and the same SecretSuffix
-    contract, so the checks mirror that file with the script path
-    swapped.
+    See create-users.Tests.ps1 for the rationale - after feature 88 D2-C,
+    remove-users.ps1 is the symmetric thin entry point: it bootstraps modules,
+    dot-sources its remove-direction reconcile helpers plus the shared
+    orchestrator, and makes a single Invoke-VmUserReconcileRun call carrying the
+    remove-direction final-phase label and a -PerVmAction that calls
+    Invoke-VmUserRemove. The shared behaviour is covered once by
+    reconcile/common/Invoke-VmUserReconcileRun.Tests.ps1; these checks mirror
+    create-users.Tests.ps1 with the direction swapped.
 #>
 
 BeforeAll {
@@ -41,6 +45,10 @@ BeforeAll {
         }
         return $null
     }
+
+    # This entry script's remove-direction identity.
+    $script:expectedFinalPhase = 'Per-VM SSH removal'
+    $script:expectedPerVmVerb  = 'Invoke-VmUserRemove'
 }
 
 Describe 'remove-users.ps1 - SecretSuffix parameter contract' {
@@ -76,98 +84,67 @@ Describe 'remove-users.ps1 - SecretSuffix parameter contract' {
     }
 }
 
-Describe 'remove-users.ps1 - Get-Secret wiring carries the suffix' {
+Describe 'remove-users.ps1 - delegates to the shared orchestrator' {
 
     BeforeAll {
-        $script:getSecretCalls = $script:commands | Where-Object {
-            $_.GetCommandName() -eq 'Get-Secret'
-        }
+        $script:orchestratorCalls = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Invoke-VmUserReconcileRun' })
     }
 
-    It 'calls Get-Secret exactly twice (once per vault)' {
-        @($script:getSecretCalls).Count | Should -Be 2
+    It 'dot-sources the shared orchestrator helper' {
+        $script:scriptText | Should -Match 'reconcile\\common\\Invoke-VmUserReconcileRun\.ps1'
     }
 
-    It 'the VmProvisioner-vault Get-Secret binds -Name to a variable' {
-        $call = $script:getSecretCalls | Where-Object {
-            $vaultArg = Get-BoundArgFor -Call $_ -ParameterName 'Vault'
-            $vaultArg -and $vaultArg.Extent.Text -eq 'VmProvisioner'
-        } | Select-Object -First 1
-        $call | Should -Not -BeNullOrEmpty
+    It 'calls Invoke-VmUserReconcileRun exactly once' {
+        $script:orchestratorCalls.Count | Should -Be 1
+    }
 
-        $nameArg = Get-BoundArgFor -Call $call -ParameterName 'Name'
-        $nameArg | Should -BeOfType `
+    It 'binds -SecretSuffix to the script $SecretSuffix parameter' {
+        $arg = Get-BoundArgFor -Call $script:orchestratorCalls[0] -ParameterName 'SecretSuffix'
+        $arg | Should -BeOfType `
             ([System.Management.Automation.Language.VariableExpressionAst])
+        $arg.VariablePath.UserPath | Should -Be 'SecretSuffix'
     }
 
-    It 'the VmUsers-vault Get-Secret binds -Name to a variable' {
-        $call = $script:getSecretCalls | Where-Object {
-            $vaultArg = Get-BoundArgFor -Call $_ -ParameterName 'Vault'
-            $vaultArg -and $vaultArg.Extent.Text -eq 'VmUsers'
-        } | Select-Object -First 1
-        $call | Should -Not -BeNullOrEmpty
-
-        $nameArg = Get-BoundArgFor -Call $call -ParameterName 'Name'
-        $nameArg | Should -BeOfType `
-            ([System.Management.Automation.Language.VariableExpressionAst])
+    It 'passes the remove-direction final-phase label' {
+        $arg = Get-BoundArgFor -Call $script:orchestratorCalls[0] -ParameterName 'FinalPhaseName'
+        $arg.Value | Should -Be $script:expectedFinalPhase
     }
 
-    It 'assembles the VmProvisioner secret name by interpolating $SecretSuffix' {
-        $script:scriptText | Should -Match `
-            '"VmProvisionerConfig-\$SecretSuffix"'
-    }
-
-    It 'assembles the VmUsers secret name by interpolating $SecretSuffix' {
-        $script:scriptText | Should -Match `
-            '"VmUsersConfig-\$SecretSuffix"'
+    It 'wires the per-VM action to Invoke-VmUserRemove' {
+        $arg = Get-BoundArgFor -Call $script:orchestratorCalls[0] -ParameterName 'PerVmAction'
+        $arg | Should -BeOfType `
+            ([System.Management.Automation.Language.ScriptBlockExpressionAst])
+        $arg.Extent.Text | Should -Match $script:expectedPerVmVerb
     }
 }
 
-Describe 'remove-users.ps1 - jump-host wiring (feature 53 NAT topology)' {
-
-    # Symmetric to create-users.ps1's jump-host wiring tests. The remove
-    # path is the same shape (resolve router, stamp _RouterVm, connect
-    # via the jump-aware helper) so its regression surface is identical.
-
-    BeforeAll {
-        $script:commandCalls = $script:commands |
-            Where-Object { $null -ne $_.GetCommandName() }
-    }
-
-    It 'calls Get-VmKvpIpAddress to discover the router upstream IP' {
-        $call = $script:commandCalls | Where-Object {
-            $_.GetCommandName() -eq 'Get-VmKvpIpAddress'
-        } | Select-Object -First 1
-        $call | Should -Not -BeNullOrEmpty
-    }
-
-    It 'calls New-VmSshClientWithJump for the per-VM SSH session' {
-        $call = $script:commandCalls | Where-Object {
-            $_.GetCommandName() -eq 'New-VmSshClientWithJump'
-        } | Select-Object -First 1
-        $call | Should -Not -BeNullOrEmpty
-    }
-
-    It 'stamps _RouterVm onto workloads via Add-Member' {
-        # (?s) enables single-line mode so the regex spans the backtick
-        # continuation between `Add-Member` and `-Name '_RouterVm'`.
-        $script:scriptText | Should -Match `
-            "(?s)Add-Member[^']*-Name\s+'_RouterVm'"
-    }
-
-    It 'no longer constructs Renci.SshNet.SshClient directly' {
-        $script:scriptText | Should -Not -Match `
-            '\[Renci\.SshNet\.SshClient\]::new'
-    }
-}
-
-Describe 'remove-users.ps1 - no stale unsuffixed literals' {
+Describe 'remove-users.ps1 - no orchestration behaviour leaked back in' {
 
     BeforeAll {
         $script:stringLiterals = $script:ast.FindAll({
             param($node)
             $node -is [System.Management.Automation.Language.StringConstantExpressionAst]
         }, $true)
+    }
+
+    It 'no longer reads the vaults directly (Get-Secret moved to the orchestrator)' {
+        $getSecret = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Get-Secret' })
+        $getSecret.Count | Should -Be 0
+    }
+
+    It 'no longer declares its own timing stages' {
+        $init = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Initialize-PhaseTimings' })
+        $init.Count | Should -Be 0
+    }
+
+    It 'no longer exports the timing tree directly (the orchestrator finally owns it)' {
+        $export = @($script:commands | Where-Object {
+            $_.GetCommandName() -in @('Export-PhaseTimingTree', 'Export-PhaseTimingTreeIfRequested')
+        })
+        $export.Count | Should -Be 0
     }
 
     It 'has no bare "VmProvisionerConfig" string literal' {
@@ -182,5 +159,15 @@ Describe 'remove-users.ps1 - no stale unsuffixed literals' {
             $_.Value -eq 'VmUsersConfig'
         }
         @($offenders).Count | Should -Be 0
+    }
+}
+
+Describe 'remove-users.ps1 - Common.PowerShell floor' {
+
+    It 'raises the Common.PowerShell floor to the Export-PhaseTimingTreeIfRequested release (>= 9.3.0)' {
+        $depsPath = Join-Path (Split-Path $script:scriptPath -Parent) `
+            '..\shared\Install-ModuleDependencies.ps1'
+        $depsText = Get-Content -Path $depsPath -Raw
+        $depsText | Should -Match "MinimumVersion '(9\.(?:[3-9]|\d\d+)\.\d+|[1-9]\d+\.\d+\.\d+)'"
     }
 }

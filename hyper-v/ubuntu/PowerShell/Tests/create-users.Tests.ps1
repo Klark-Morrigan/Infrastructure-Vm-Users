@@ -1,30 +1,24 @@
 <#
 .SYNOPSIS
-    Structural wiring checks for create-users.ps1.
+    Structural wiring checks for the thin create-users.ps1 entry script.
 
 .DESCRIPTION
-    create-users.ps1 has top-level side effects (module install/import,
-    two vault reads, SSH reconcile loop) that make it impractical to
-    dot-source from a test. The script also reads the two SecretManagement
-    secrets inline rather than via an extracted helper, so there is no
-    function seam to mock for behavioural coverage.
+    After feature 88 D2-C, create-users.ps1 is a thin entry point: it
+    bootstraps modules, dot-sources its create-direction reconcile helpers plus
+    the shared orchestrator, and makes a single call to Invoke-VmUserReconcileRun
+    with the create-direction final-phase label and a -PerVmAction that calls
+    Invoke-VmUserCreate. All the multi-stage behaviour (the two vault reads,
+    router resolution, the vmName join, the SSH probe, the per-VM session
+    lifecycle, and the timing export) moved into the orchestrator, which is
+    behaviourally tested under reconcile/common/Invoke-VmUserReconcileRun.Tests.ps1.
 
-    As a pragmatic compromise these tests parse the file via AST and
-    assert the parts of the SecretSuffix contract that would otherwise
-    silently regress:
-
-      - $SecretSuffix is a Mandatory + ValidateNotNullOrEmpty script
-        parameter.
-      - Both Get-Secret calls bind -Name to a variable (the per-vault
-        $...SecretName string assembled from $SecretSuffix), NOT a
-        literal vault key.
-      - The two name-building expandable strings interpolate
-        $SecretSuffix - a regression that hard-codes the suffix would
-        defeat the lifecycle-isolation contract the parameter exists
-        to enforce.
-      - No bare 'VmProvisionerConfig' or 'VmUsersConfig' string
-        literals remain in the file (regression guard for a partial
-        revert).
+    The script still has top-level side effects (module install/import) that make
+    it impractical to dot-source, so these AST checks pin only what the thin entry
+    script itself owns: the SecretSuffix parameter contract, the single
+    orchestrator call carrying the suffix and the create-direction label, the
+    per-VM action wired to Invoke-VmUserCreate, and the absence of any stale
+    behaviour (bare secret literals, direct vault reads) that would signal a
+    partial revert of the extraction.
 #>
 
 BeforeAll {
@@ -62,6 +56,10 @@ BeforeAll {
         }
         return $null
     }
+
+    # This entry script's create-direction identity.
+    $script:expectedFinalPhase = 'Per-VM SSH reconcile'
+    $script:expectedPerVmVerb  = 'Invoke-VmUserCreate'
 }
 
 Describe 'create-users.ps1 - SecretSuffix parameter contract' {
@@ -97,115 +95,52 @@ Describe 'create-users.ps1 - SecretSuffix parameter contract' {
     }
 }
 
-Describe 'create-users.ps1 - Get-Secret wiring carries the suffix' {
-
-    # Each Get-Secret call must bind -Name to a variable (the assembled
-    # `VmProvisionerConfig-$SecretSuffix` / `VmUsersConfig-$SecretSuffix`
-    # string), not a bare literal. A regression that replaces the
-    # variable with the old literal would silently defeat the per-
-    # lifecycle isolation the parameter exists to enforce.
+Describe 'create-users.ps1 - delegates to the shared orchestrator' {
 
     BeforeAll {
-        $script:getSecretCalls = $script:commands | Where-Object {
-            $_.GetCommandName() -eq 'Get-Secret'
-        }
+        $script:orchestratorCalls = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Invoke-VmUserReconcileRun' })
     }
 
-    It 'calls Get-Secret exactly twice (once per vault)' {
-        @($script:getSecretCalls).Count | Should -Be 2
+    It 'dot-sources the shared orchestrator helper' {
+        # The single call below resolves only if the orchestrator is dot-sourced
+        # first; pin the dot-source so a dropped import fails here, not at runtime.
+        $script:scriptText | Should -Match 'reconcile\\common\\Invoke-VmUserReconcileRun\.ps1'
     }
 
-    It 'the VmProvisioner-vault Get-Secret binds -Name to a variable' {
-        $call = $script:getSecretCalls | Where-Object {
-            $vaultArg = Get-BoundArgFor -Call $_ -ParameterName 'Vault'
-            $vaultArg -and $vaultArg.Extent.Text -eq 'VmProvisioner'
-        } | Select-Object -First 1
-        $call | Should -Not -BeNullOrEmpty
+    It 'calls Invoke-VmUserReconcileRun exactly once' {
+        $script:orchestratorCalls.Count | Should -Be 1
+    }
 
-        $nameArg = Get-BoundArgFor -Call $call -ParameterName 'Name'
-        $nameArg | Should -BeOfType `
+    It 'binds -SecretSuffix to the script $SecretSuffix parameter' {
+        $arg = Get-BoundArgFor -Call $script:orchestratorCalls[0] -ParameterName 'SecretSuffix'
+        $arg | Should -BeOfType `
             ([System.Management.Automation.Language.VariableExpressionAst])
+        $arg.VariablePath.UserPath | Should -Be 'SecretSuffix'
     }
 
-    It 'the VmUsers-vault Get-Secret binds -Name to a variable' {
-        $call = $script:getSecretCalls | Where-Object {
-            $vaultArg = Get-BoundArgFor -Call $_ -ParameterName 'Vault'
-            $vaultArg -and $vaultArg.Extent.Text -eq 'VmUsers'
-        } | Select-Object -First 1
-        $call | Should -Not -BeNullOrEmpty
-
-        $nameArg = Get-BoundArgFor -Call $call -ParameterName 'Name'
-        $nameArg | Should -BeOfType `
-            ([System.Management.Automation.Language.VariableExpressionAst])
+    It 'passes the create-direction final-phase label' {
+        # Guards the third stage name the E2E graft (C2) attaches under the
+        # "reconcile users" part; a rename here silently reshapes that report.
+        $arg = Get-BoundArgFor -Call $script:orchestratorCalls[0] -ParameterName 'FinalPhaseName'
+        $arg.Value | Should -Be $script:expectedFinalPhase
     }
 
-    It 'assembles the VmProvisioner secret name by interpolating $SecretSuffix' {
-        $script:scriptText | Should -Match `
-            '"VmProvisionerConfig-\$SecretSuffix"'
-    }
-
-    It 'assembles the VmUsers secret name by interpolating $SecretSuffix' {
-        $script:scriptText | Should -Match `
-            '"VmUsersConfig-\$SecretSuffix"'
+    It 'wires the per-VM action to Invoke-VmUserCreate' {
+        # The lone create-vs-remove difference: the entry script's -PerVmAction
+        # body must call its own create helper over the open session.
+        $arg = Get-BoundArgFor -Call $script:orchestratorCalls[0] -ParameterName 'PerVmAction'
+        $arg | Should -BeOfType `
+            ([System.Management.Automation.Language.ScriptBlockExpressionAst])
+        $arg.Extent.Text | Should -Match $script:expectedPerVmVerb
     }
 }
 
-Describe 'create-users.ps1 - jump-host wiring (feature 53 NAT topology)' {
+Describe 'create-users.ps1 - no orchestration behaviour leaked back in' {
 
-    # The host has no route into the per-environment private switch
-    # workloads sit on after feature 53 step 2. The script must (1)
-    # find the router row in VmProvisionerConfig, (2) discover its
-    # upstream IP via KVP, (3) stamp _RouterVm onto every workload in
-    # the same env, and (4) reach workloads via New-VmSshClientWithJump
-    # instead of constructing a Renci.SshNet.SshClient directly. Lock
-    # each leg as a structural check so a future refactor that drops
-    # one of them is caught before the agent first runs.
-
-    BeforeAll {
-        $script:commandCalls = $script:commands |
-            Where-Object { $null -ne $_.GetCommandName() }
-    }
-
-    It 'calls Get-VmKvpIpAddress to discover the router upstream IP' {
-        $call = $script:commandCalls | Where-Object {
-            $_.GetCommandName() -eq 'Get-VmKvpIpAddress'
-        } | Select-Object -First 1
-        $call | Should -Not -BeNullOrEmpty
-    }
-
-    It 'calls New-VmSshClientWithJump for the per-VM SSH session' {
-        $call = $script:commandCalls | Where-Object {
-            $_.GetCommandName() -eq 'New-VmSshClientWithJump'
-        } | Select-Object -First 1
-        $call | Should -Not -BeNullOrEmpty
-    }
-
-    It 'stamps _RouterVm onto workloads via Add-Member' {
-        # Regression guard: New-VmSshClientWithJump decides direct vs
-        # jumped based on this property. If the stamping is dropped,
-        # every workload silently falls back to the direct-connect
-        # branch and times out behind the router. (?s) enables single-
-        # line mode so the regex spans the backtick continuation
-        # between `Add-Member` and `-Name '_RouterVm'`.
-        $script:scriptText | Should -Match `
-            "(?s)Add-Member[^']*-Name\s+'_RouterVm'"
-    }
-
-    It 'no longer constructs Renci.SshNet.SshClient directly' {
-        # Regression guard for a partial revert. The jump-aware helper
-        # owns the SshClient lifetime now; bare construction here would
-        # bypass the jump leg entirely.
-        $script:scriptText | Should -Not -Match `
-            '\[Renci\.SshNet\.SshClient\]::new'
-    }
-}
-
-Describe 'create-users.ps1 - no stale unsuffixed literals' {
-
-    # Regression guard for a partial revert. A bare 'VmProvisionerConfig'
-    # or 'VmUsersConfig' StringConstantExpressionAst anywhere in the file
-    # is a strong signal that the suffix wiring was undone in one spot
-    # but the rest of the file was left alone.
+    # Regression guards for a partial revert of the D2-C extraction. Everything
+    # below moved into Invoke-VmUserReconcileRun; a reappearance here means the
+    # thin entry script grew a second, drifting copy of the flow.
 
     BeforeAll {
         $script:stringLiterals = $script:ast.FindAll({
@@ -214,12 +149,31 @@ Describe 'create-users.ps1 - no stale unsuffixed literals' {
         }, $true)
     }
 
+    It 'no longer reads the vaults directly (Get-Secret moved to the orchestrator)' {
+        $getSecret = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Get-Secret' })
+        $getSecret.Count | Should -Be 0
+    }
+
+    It 'no longer declares its own timing stages' {
+        $init = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Initialize-PhaseTimings' })
+        $init.Count | Should -Be 0
+    }
+
+    It 'no longer exports the timing tree directly (the orchestrator finally owns it)' {
+        $export = @($script:commands | Where-Object {
+            $_.GetCommandName() -in @('Export-PhaseTimingTree', 'Export-PhaseTimingTreeIfRequested')
+        })
+        $export.Count | Should -Be 0
+    }
+
     It 'has no bare "VmProvisionerConfig" string literal' {
         $offenders = $script:stringLiterals | Where-Object {
             $_.Value -eq 'VmProvisionerConfig'
         }
         @($offenders).Count | Should -Be 0 `
-            -Because 'the secret name must always carry the suffix'
+            -Because 'the secret name lives in the orchestrator and always carries the suffix'
     }
 
     It 'has no bare "VmUsersConfig" string literal' {
@@ -227,5 +181,19 @@ Describe 'create-users.ps1 - no stale unsuffixed literals' {
             $_.Value -eq 'VmUsersConfig'
         }
         @($offenders).Count | Should -Be 0
+    }
+}
+
+Describe 'create-users.ps1 - Common.PowerShell floor' {
+
+    It 'raises the Common.PowerShell floor to the Export-PhaseTimingTreeIfRequested release (>= 9.3.0)' {
+        # The shim the orchestrator calls ships in Common.PowerShell 9.3.0; the
+        # bootstrap floor must stay >= that so the import resolves it. Pin the
+        # MinimumVersion so a downgrade cannot silently leave the run calling an
+        # unexported verb.
+        $depsPath = Join-Path (Split-Path $script:scriptPath -Parent) `
+            '..\shared\Install-ModuleDependencies.ps1'
+        $depsText = Get-Content -Path $depsPath -Raw
+        $depsText | Should -Match "MinimumVersion '(9\.(?:[3-9]|\d\d+)\.\d+|[1-9]\d+\.\d+\.\d+)'"
     }
 }

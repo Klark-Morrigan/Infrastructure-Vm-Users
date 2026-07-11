@@ -89,10 +89,17 @@ if (-not $_nuget -or $_nuget.Version -lt [Version]'2.8.5.201') {
 }
 
 # Step 2 - Common.PowerShell (chicken-and-egg bootstrap)
+# Floor is 9.3.0: that release adds Export-PhaseTimingTreeIfRequested, the
+# self-guarding opt-in wrapper over Export-PhaseTimingTree that create-users.ps1
+# / remove-users.ps1 call (a single unguarded call each) in their outer finally
+# to hand their phase-timing tree to a parent orchestrator on the
+# TIMING_TREE_OUTPUT_PATH opt-in. 9.2.0 shipped the underlying
+# Export-PhaseTimingTree; 9.1.0 shipped the 2-level phase-timing compat shims
+# (Initialize-PhaseTimings / Invoke-WithPhaseTimer) those scripts also consume.
 $_common = Get-Module -ListAvailable -Name Common.PowerShell |
     Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'5.1.0') {
-    Install-PowerShellCommonWithRetry -MinimumVersion '6.0.0'
+if (-not $_common -or $_common.Version -lt [Version]'9.3.0') {
+    Install-PowerShellCommonWithRetry -MinimumVersion '9.3.0'
     # Re-query so the comparison below uses the freshly installed version.
     $_common = Get-Module -ListAvailable -Name Common.PowerShell |
         Sort-Object Version -Descending | Select-Object -First 1

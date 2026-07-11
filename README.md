@@ -21,6 +21,7 @@ state stored in a local encrypted vault.
 - [Config reference](#config-reference)
 - [Reconciliation behaviour](#reconciliation-behaviour)
 - [Removal](#removal)
+- [Cross-process timing (opt-in)](#cross-process-timing-opt-in)
 - [Consuming Common-Ansible](#consuming-common-ansible)
 - [CI](#ci)
 - [Repo structure](#repo-structure)
@@ -288,6 +289,30 @@ group from each reachable VM. On each run:
 
 ---
 
+## Cross-process timing (opt-in)
+
+Both `create-users.ps1` and `remove-users.ps1` run through one shared
+orchestrator (`reconcile/common/Invoke-VmUserReconcileRun.ps1`) that times its
+three stages - `Read configs + resolve router IP`, `Match + SSH-probe targets`,
+and the per-VM SSH reconcile/removal (the final stage's label differs per
+direction) - using the phase-timing shims from `Common.PowerShell`. The timing
+is invisible to a direct operator run.
+
+When the environment variable **`TIMING_TREE_OUTPUT_PATH`** is set, the
+orchestrator also serialises the phase tree to that path (as schema-versioned
+nested JSON) on both the success and failure paths. It does this with a single
+`Export-PhaseTimingTreeIfRequested` call in its outer `finally`: that
+self-guarding `Common.PowerShell` shim reads the variable and exports only when
+it is set, so the guard and the contract name live once inside the shim rather
+than being hand-written at each site. A parent orchestrator -
+[Infrastructure-E2E] - sets it before shelling out and grafts the imported
+tree under its "reconcile users" part, so an otherwise opaque shell-out span
+gains its internal breakdown. The variable name is neutral: these scripts do
+not know who consumes it. When it is unset, no file is written and behaviour
+is unchanged.
+
+---
+
 ## Consuming Common-Ansible
 
 The Ansible migration of the user domain (feature 19) places the user
@@ -335,12 +360,15 @@ cd hyper-v/ubuntu/Ansible
 ops/bootstrap-controller.sh
 ```
 
-[`ops/bootstrap-controller.sh`](hyper-v/ubuntu/Ansible/ops/bootstrap-controller.sh) is thin: it
-locates the Common-Ansible sibling (override with `COMMON_ANSIBLE_ROOT`)
-and makes sure the shared controller is built, delegating to
-Common-Ansible's own bootstrap when its venv is absent. There is nothing
-to install for this repo - reusing the substrate controller instead of
-forking it is the whole point of the Common- split.
+[`ops/bootstrap-controller.sh`](hyper-v/ubuntu/Ansible/ops/bootstrap-controller.sh) is a thin
+shim: it resolves the Common-Ansible sibling (override with
+`COMMON_ANSIBLE_ROOT`) and execs the substrate's shared consumer bootstrap
+(`ops/bootstrap-controller-consumer.sh`), which makes sure the controller is
+built - delegating to Common-Ansible's own bootstrap when its venv is absent.
+That locate/build logic is a single source of truth in the substrate, shared
+by every consumer. There is nothing to install for this repo - reusing the
+substrate controller instead of forking it is the whole point of the Common-
+split.
 
 ### Running the create / remove user flows
 
@@ -468,9 +496,12 @@ hyper-v/ubuntu/
     Install-ModuleDependencies.ps1
     Tests/                        setup-secrets.Tests.ps1
   PowerShell/                   PowerShell user implementation
-    create-users.ps1              Entry point - reconciles groups, users, sudoers
-    remove-users.ps1              Entry point - removes users, sudoers, groups
-    reconcile/ {common,up,down}   Shared / create / remove reconciliation logic
+    create-users.ps1              Thin entry - calls the orchestrator (create direction)
+    remove-users.ps1              Thin entry - calls the orchestrator (remove direction)
+    reconcile/
+      common/                       Shared orchestrator (Invoke-VmUserReconcileRun), config parser, declared-groups guard
+      up/                           Create-direction reconcile helpers
+      down/                         Remove-direction reconcile helpers
     Tests/
       reconcile/ {common,up,down}     Unit tests mirroring the impl
       Integration.DockerHost/         One shared SSH session (Docker)
@@ -503,4 +534,5 @@ docs/dev/                       playbook-conventions.md + implementation/
 ```
 
 [Common-Ansible]: ../Common-Ansible
+[Infrastructure-E2E]: ../Infrastructure-E2E
 [Infrastructure-Vm-Provisioner]: ../Infrastructure-Vm-Provisioner

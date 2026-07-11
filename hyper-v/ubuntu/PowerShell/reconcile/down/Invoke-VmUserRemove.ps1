@@ -33,11 +33,9 @@ function Invoke-VmUserRemove {
 
     $users = @($Entry.users)
 
-    # Guards the optional 'groups' property before accessing it. @(...) collects
-    # the if-expression output into an array; when 'groups' is absent nothing
-    # is emitted and the result is @() rather than $null.
-    $entryMembers   = $Entry.PSObject.Properties.Name
-    $declaredGroups = @(if ($entryMembers -contains 'groups') { $Entry.groups })
+    # Shared with the create path; the optional-groups guard lives once in
+    # Get-VmEntryDeclaredGroups (reconcile/common).
+    $declaredGroups = Get-VmEntryDeclaredGroups -Entry $Entry
 
     foreach ($user in $users) {
         Write-Host "[$VmName] Removing user '$($user.username)' ..." -ForegroundColor Cyan

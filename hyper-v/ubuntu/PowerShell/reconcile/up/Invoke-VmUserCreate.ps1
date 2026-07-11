@@ -35,11 +35,9 @@ function Invoke-VmUserCreate {
 
     $users = @($Entry.users)
 
-    # Guards the optional 'groups' property before accessing it. @(...) collects
-    # the if-expression output into an array; when 'groups' is absent nothing
-    # is emitted and the result is @() rather than $null.
-    $entryMembers   = $Entry.PSObject.Properties.Name
-    $declaredGroups = @(if ($entryMembers -contains 'groups') { $Entry.groups })
+    # Shared with the remove path; the optional-groups guard lives once in
+    # Get-VmEntryDeclaredGroups (reconcile/common).
+    $declaredGroups = Get-VmEntryDeclaredGroups -Entry $Entry
 
     # Step 1: groups must exist before users reference them in useradd/usermod.
     Invoke-GroupReconciliation `
