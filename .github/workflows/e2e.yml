@@ -4,9 +4,11 @@ name: Infrastructure-E2E
 # Always runs the full lifecycle layer - a users change can cascade to break
 # runner registration, so the full stack must be verified.
 #
-# Pins both layers to ansible so this repo's PR exercises the full Ansible stack -
-# its own users flow (create-users.sh / remove-users.sh on the Common-Ansible
-# substrate) and the runner flow the full lifecycle cascades into. The ansible
+# Pins all three layers to ansible so this repo's PR exercises the full Ansible
+# stack - its own users flow (create-users.sh / remove-users.sh on the
+# Common-Ansible substrate), plus the runner and toolchain flows the full
+# lifecycle cascades into. The toolchain flow runs provision-toolchains.sh
+# against the Common-Ansible jdk / dotnet_sdk / dotnet_tools roles. The ansible
 # flows need WslDistro in the E2EConfig vault. This pin does not cover the
 # PowerShell create-users.ps1 / remove-users.ps1 path - use an explicit override
 # or a matrix for that.
@@ -18,4 +20,4 @@ jobs:
     uses: Klark-Morrigan/Infrastructure-E2E/.github/workflows/e2e.yml@master
     secrets: inherit
     with:
-      flow-spec: '{"usersFlow":"ansible","runnersFlow":"ansible"}'
+      flow-spec: '{"usersFlow":"ansible","runnersFlow":"ansible","toolchainsFlow":"ansible"}'
