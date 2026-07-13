@@ -440,14 +440,17 @@ Klark-Morrigan/Common-PowerShell/.github/workflows/ci-powershell.yml@master
 The shared workflow runs `scripts\Run-Tests.ps1` on PowerShell 7.
 No additional CI configuration is needed in this repo.
 
-Two more thin workflows lint the YAML and Bash surfaces by delegating to
-**Common-Automation**, so the lint config is single-sourced and cannot drift
-per repo:
+Three more thin workflows lint the non-PowerShell surfaces by delegating to
+shared reusable workflows, so the lint config is single-sourced and cannot
+drift per repo. The YAML and Bash gates come from **Common-Automation**; the
+Ansible gate comes from **Common-Ansible**, which pins the ansible-lint
+toolchain next to the controller venv this repo already consumes:
 
 | Workflow | Runs |
 |---|---|
-| `.github/workflows/ci-yaml.yml` | actionlint, action-validator, yamllint, ansible-lint |
+| `.github/workflows/ci-yaml.yml` | actionlint, action-validator, yamllint |
 | `.github/workflows/ci-bash.yml` | shellcheck, check-sh-executable, bats |
+| `.github/workflows/ci-ansible.yml` | ansible-lint (from Common-Ansible) |
 
 Each linter auto-skips when its surface is absent. To reproduce the same checks
 locally (Git Bash + Docker), three sibling shim commands map to the CI surface:

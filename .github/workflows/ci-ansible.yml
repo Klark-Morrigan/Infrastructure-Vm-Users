@@ -1,0 +1,18 @@
+# Ansible-domain CI gate for this repo. Delegates to the reusable
+# ci-ansible workflow in Common-Ansible, which runs ansible-lint from a
+# hash-locked controller venv (not a Docker image) against this repo's
+# Ansible content. This repo keeps its Ansible implementation nested under
+# hyper-v/ubuntu/Ansible/; the root ansible.cfg lint shim points
+# ansible-lint's short-name roles_path at that slice so the gate lints the
+# nested roles rather than auto-skipping. The reusable workflow sparse-
+# checks-out the Common-Ansible substrate (pinned toolchain + bundled
+# production config) into .common-ansible/ for the run.
+name: Common-Ansible
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ci-ansible:
+    uses: Klark-Morrigan/Common-Ansible/.github/workflows/ci-ansible.yml@master
