@@ -529,7 +529,8 @@ ansible.cfg                     Lint shim: keeps the fleet ansible-lint gate act
 scripts/
   Run-Tests.ps1  Run-IntegrationTests.ps1   Pester unit / integration runners
   run-ci-yaml-and-bash.sh / .bat            MAIN: full local lint + bats
-  run-lint-yaml-and-bash.sh / .bat          Lint half only
+  run-lint-yaml-and-bash.sh / .bat          Lint half only (cross-cutting linters + ansible-lint)
+  run-lint-ansible.sh                       ansible-lint via the shared Common-Ansible controller venv
   run-tests-bash.sh / .bat                  Bats test half only
   fix-permissions.sh / .bat                 Re-stage +x on tracked *.sh
 docs/dev/                       playbook-conventions.md + implementation/
